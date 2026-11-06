@@ -1,0 +1,39 @@
+{
+  "name": "dsh-horon",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "harness.js",
+    "client.js",
+    "docker.js",
+    "horon_web_app.py",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "skills/*/SKILL.md",
+    "docker/Dockerfile",
+    "docker/docker-compose.yml",
+    "docker/entrypoint.sh",
+    "docker/build.mjs",
+    "docker/requirements.lock.txt",
+    "docker/env.example",
+    "docker/.dockerignore",
+    "docker/context/**"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": ["@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-settings"]
+    }
+  }
+}

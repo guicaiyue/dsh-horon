@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "title": "Horon 记忆控制台",
+    "description": "启动 Horon 记忆控制台，并在左栏入口里打开它。"
+  },
+  "nav": "Horon 记忆",
+  "starting": "正在启动 Horon 服务…",
+  "waiting": "Horon 服务还没有响应，确认 dsh-horon 插件已启用、服务正在运行",
+  "retry": "重试",
+  "open": "在新标签页打开"
+}

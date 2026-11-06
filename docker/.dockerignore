@@ -1,0 +1,9 @@
+# 构建上下文是 docker/context/（由 build.mjs 从 Horon 仓库挑文件组装），这里再兜一层底。
+**/.env
+**/*.db
+**/*.db-*
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/dist
+**/.horon-local

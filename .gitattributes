@@ -1,0 +1,8 @@
+# Keep shell scripts LF so the Docker entrypoint stays runnable inside the image.
+* text=auto eol=lf
+*.sh text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.svg text eol=lf

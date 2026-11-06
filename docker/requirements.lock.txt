@@ -1,0 +1,19 @@
+# Horon 服务镜像的锁定依赖。版本取自本机 C:\Users\xiaoliyue\horon\.venv（2026-11-03）。
+# Horon 仓库的 requirements.txt 只列包名不锁版本，这里锁住，保证 NAS 和本机装出来的是同一套。
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+click==8.5.0
+fastapi==0.162.0
+h11==0.16.0
+idna==3.20
+json_repair==0.64.2
+numpy==2.5.4
+opentelemetry-api==1.45.1
+pydantic==2.14.1
+pydantic_core==2.50.1
+python-dotenv==1.2.4
+starlette==1.10.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.54.0

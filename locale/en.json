@@ -1,0 +1,11 @@
+{
+  "meta": {
+    "title": "Horon Memory Console",
+    "description": "Runs the Horon memory console and opens it from a sidebar entry."
+  },
+  "nav": "Horon Memory",
+  "starting": "Starting the Horon service…",
+  "waiting": "The Horon service has not answered yet; check that the dsh-horon plugin is enabled and the service is running",
+  "retry": "Retry",
+  "open": "Open in a new tab"
+}

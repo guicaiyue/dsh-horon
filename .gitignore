@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# python caches / bytecode
+__pycache__/
+*.py[cod]
+
+# generated docker build context (regenerate with `node docker/build.mjs <horon-repo>`)
+docker/context/
+
+# local runtime state: databases, secrets, mounts
+.env
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+.horon-local/
+
+# build output
+dist/
+
+# editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

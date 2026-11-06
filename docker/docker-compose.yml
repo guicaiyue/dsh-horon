@@ -1,0 +1,59 @@
+# Horon 服务（手写版 compose）。构建上下文随插件发布，先组装再起容器（在本目录下运行）：
+#   node build.mjs [Horon 仓库路径]       # 默认 C:\Users\xiaoliyue\horon，或设 HORON_REPO
+#   cp env.example "$HORON_DATA_DIR/.env" # 按需填 API key / 代理
+#   docker compose up -d --build
+#
+# dsh 的「设置 → Horon 服务」页会按当前配置直接生成一份填好路径的 compose 和命令，
+# 平时用那一份即可；这份只是同一个容器的等价手写版，路径靠 HORON_DATA_DIR 传入。
+#
+# HORON_DATA_DIR 是宿主机上的数据目录，**每台机器各用各的**：默认 C:\Users\<你>\.horon\docker
+# 或 ~/.horon/docker。Windows PowerShell 里设：
+#   $env:HORON_DATA_DIR = "$env:USERPROFILE\.horon\docker"
+# Linux：
+#   export HORON_DATA_DIR="$HOME/.horon/docker"
+#
+# 三个挂载都是宿主机上的绑定挂载，重建容器不会丢；不要把别的机器的 horon.db 拷进来。
+# 服务没有鉴权：默认只绑回环；要给内网其它机器的 dsh 用，把 HORON_BIND 改成 0.0.0.0。
+name: horon
+
+services:
+  horon:
+    build:
+      context: ./context
+      args:
+        BUILD_PROXY: ${BUILD_PROXY:-}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+        PIP_INDEX: ${PIP_INDEX:-}
+    image: ${HORON_IMAGE:-horon-service:local}
+    container_name: ${HORON_CONTAINER:-horon}
+    restart: unless-stopped
+    # 积压的补向量任务会以 detached 子进程跑（backend/integrity.py），需要 init 收尸。
+    init: true
+    ports:
+      - "${HORON_BIND:-127.0.0.1}:${HORON_PORT:-8710}:8710"
+    env_file:
+      - path: ${HORON_DATA_DIR:?请先设置 HORON_DATA_DIR}/.env
+        required: false
+    environment:
+      # -e 会盖过 env_file，所以文件里残留的 HORON_DB 指不到容器里不存在的路径也不会出事。
+      HORON_DB: /data/horon.db
+      HORON_ROOT: /app
+      TZ: ${TZ:-Asia/Shanghai}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - type: bind
+        source: ${HORON_DATA_DIR:?请先设置 HORON_DATA_DIR}/data
+        target: /data
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${HORON_DATA_DIR:?请先设置 HORON_DATA_DIR}/local
+        target: /app/.horon-local
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${HORON_DATA_DIR:?请先设置 HORON_DATA_DIR}/tag_plugins
+        target: /app/backend/tag_plugins
+        bind:
+          create_host_path: true
