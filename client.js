@@ -104,6 +104,12 @@ window.__ModuleLoader__.load({
       dockerVersion: 'Docker',
       noContainer: '还没有容器',
       containerState: '容器状态',
+      guardChain: '拦截链',
+      guardOn: '已挂载',
+      guardOff: '已关闭（hooks: false）',
+      guardDenied: '本次共拒绝',
+      guardFailed: '网关失败',
+      guardHint: '拦截链只负责问 Horon；真正拦不拦，取决于库里的 guard 电路与 tool_guards 规则。新装的库是空的，所以「拒绝 0 次」通常表示没有规则，而不是规则放行。',
     }
 
     const en = {
@@ -180,6 +186,12 @@ window.__ModuleLoader__.load({
       dockerVersion: 'Docker',
       noContainer: 'no container yet',
       containerState: 'Container',
+      guardChain: 'Guard chain',
+      guardOn: 'mounted',
+      guardOff: 'off (hooks: false)',
+      guardDenied: 'denied',
+      guardFailed: 'gateway failures',
+      guardHint: 'The chain only asks Horon; whether a call is blocked depends on the guard circuits and tool_guards rules in the database. A fresh database has none, so "denied 0" usually means no rules, not rules that passed.',
     }
 
     /** Calls the Host half and returns the parsed payload. */
@@ -582,6 +594,7 @@ window.__ModuleLoader__.load({
       const mode = draft.mode ?? data?.mode ?? 'spawn'
       const serving = preview?.serving ?? status?.serving
       const docker = status?.docker
+      const hooks = status?.hooks
       const bind = resolved.dockerBind ?? DEFAULTS.dockerBind
       const bindIsLoopback = ['127.0.0.1', 'localhost', '::1'].includes(String(bind))
 
@@ -659,6 +672,13 @@ window.__ModuleLoader__.load({
                     docker.container === undefined ? t('noContainer') : `${t('containerState')}: ${docker.container.status}`
                   }`,
                 ),
+          hooks === undefined
+            ? null
+            : h(
+                'span',
+                { className: hooks.degraded || hooks.failed > 0 ? 'dshhw-warn' : 'dshhw-status', title: t('guardHint') },
+                `${t('guardChain')}: ${hooks.enabled ? t('guardOn') : t('guardOff')} · ${t('guardDenied')} ${hooks.denied} · ${t('guardFailed')} ${hooks.failed}`,
+              ),
         ),
 
         // Host mounts

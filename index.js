@@ -57,12 +57,16 @@ import {
   renderTexts,
   startDeploy,
 } from './docker.js'
-import { applyHarness } from './harness.js'
+import { applyHarness, defaultPython, defaultRoot } from './harness.js'
 
 export const name = 'dsh-horon'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const DEFAULT_ROOT = 'C:\\Users\\xiaoliyue\\horon'
+// `~/horon` unless the profile says otherwise: a clone on another machine must work with no
+// `root`/`python` in the config, and nobody else has this machine's paths.
+const DEFAULT_ROOT = defaultRoot()
+// Guard-chain counters filled by harness.js and read by the settings page.
+const harnessStats = { calls: 0, denied: 0, failed: 0, lastError: null, degraded: false }
 const PREFIX = '[dsh-horon]'
 const START_TIMEOUT_MS = 30_000
 // Console route on the dsh web server; client.js builds the iframe URL from the same name.
@@ -113,10 +117,12 @@ function settings(config) {
         ? 'url'
         : 'spawn'
   const docker = dockerSettings(c)
+  const root = c.root ?? DEFAULT_ROOT
   return {
     mode,
-    root: c.root ?? DEFAULT_ROOT,
-    python: c.python ?? 'python',
+    root,
+    // The venv next to the repository when it exists, so a fresh clone needs no `python` either.
+    python: text(c.python) ?? defaultPython(root),
     host,
     port,
     autostart: c.autostart !== false,
@@ -419,7 +425,22 @@ async function handleApi(ctx, config, s, req, res, incoming) {
   try {
     if (action === 'status' && method === 'GET') {
       const [serving, docker] = await Promise.all([isServing(s.base, 1500), dockerStatus(s.docker)])
-      sendJson(res, 200, { mode: s.mode, base: s.base, serving, deploying: isDeploying(), docker })
+      sendJson(res, 200, {
+        mode: s.mode,
+        base: s.base,
+        serving,
+        deploying: isDeploying(),
+        docker,
+        // Whether tool calls are actually being checked by Horon's guard circuits right now.
+        hooks: {
+          enabled: (config ?? {}).hooks !== false,
+          calls: harnessStats.calls ?? 0,
+          denied: harnessStats.denied ?? 0,
+          failed: harnessStats.failed ?? 0,
+          degraded: harnessStats.degraded === true,
+          lastError: harnessStats.lastError ?? null,
+        },
+      })
       return
     }
     if (action === 'config' && method === 'GET') {
@@ -608,12 +629,15 @@ function runService(ctx, { root, python, host, port, autostart, base }) {
 
 export function apply(ctx, config) {
   const s = settings(config)
+  // A remount starts the counters over: they describe this process, not the whole history.
+  Object.assign(harnessStats, { calls: 0, denied: 0, failed: 0, lastError: null, degraded: false })
   applyHarness(ctx, {
     ...(config ?? {}),
     root: s.root,
     python: s.python,
     // Outside spawn mode the tool talks to the service over HTTP.
     url: s.mode === 'spawn' ? undefined : s.base,
+    stats: harnessStats,
   })
   registerConsoleRoute(ctx, config, s)
   if (s.skills) registerSkills(ctx, s.root)

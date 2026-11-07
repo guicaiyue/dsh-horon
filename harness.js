@@ -40,12 +40,28 @@
 
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import http from 'node:http'
 import https from 'node:https'
+import os from 'node:os'
 import path from 'node:path'
 
-const DEFAULT_ROOT = 'C:\\Users\\xiaoliyue\\horon'
+// Defaults must not carry anybody's absolute path: a clone on another machine has to work with
+// no `root`/`python` at all. The Horon repository is `~/horon` unless the profile says otherwise.
+export function defaultRoot() {
+  return path.join(os.homedir(), 'horon')
+}
+
+// The interpreter that has fastapi + uvicorn: the repository venv when it exists, else PATH python.
+export function defaultPython(root) {
+  const venv =
+    process.platform === 'win32'
+      ? path.join(root, '.venv', 'Scripts', 'python.exe')
+      : path.join(root, '.venv', 'bin', 'python')
+  return existsSync(venv) ? venv : 'python'
+}
+
 const GATEWAY_TIMEOUT_MS = 45_000 // Jev alone may take 20 s
 const SOURCE_KIND = 'horon'
 const UTF8_ENV = { PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' }
@@ -59,9 +75,9 @@ const TEXT_FILE_FLAGS = {
 }
 
 function settings(config) {
-  const root = config.root ?? DEFAULT_ROOT
+  const root = config.root ?? defaultRoot()
   const url = typeof config.url === 'string' && config.url.trim() ? config.url.trim().replace(/\/+$/, '') : undefined
-  return { root, python: config.python ?? 'python', url }
+  return { root, python: config.python ?? defaultPython(root), url }
 }
 
 // Run `python <script> <args>` in the Horon root, feeding `stdin`; resolve {code, out, err}.
@@ -225,6 +241,16 @@ const MEMORY_POLICY = [
   '- 第一次写入前先读 horon-cli 说明书；会话开始时先运行 login 并读完输出。',
 ].join('\n')
 
+// The guard chain is fail-open by design (a dead service must not brick every tool call), so a
+// failure has to be audible: without it, "nothing was blocked" is indistinguishable from
+// "the guard never ran".
+const GUARD_DOWN_SUMMARY = 'Horon guard chain degraded'
+const GUARD_DOWN = [
+  '【Horon Harness】拦截链未生效：本会话里 Horon 网关调用失败（原因见 dsh 日志中 dsh-horon 的行）。',
+  '在服务恢复之前，工具调用不会被 Horon 的 guard 电路拦截，sensor 提醒也不会送达。',
+  '这不是「没有规则」，而是「规则没跑」——修好 Horon 服务（设置 → Horon 服务 看连通性）后新会话即恢复。',
+].join('\n')
+
 function registerPolicy(ctx) {
   ctx.systemPrompt.section({
     name: 'horon:memory-policy',
@@ -292,11 +318,21 @@ function registerTool(ctx, config) {
 function registerHooks(ctx, config) {
   const log = (message) => ctx.logger?.warn?.(`horon: ${message}`)
   const { url } = settings(config)
+  // Shared with index.js: the settings page shows whether the guard chain is actually live.
+  // Interception is fail-open (a dead service must not brick every tool), so a silent failure
+  // would look exactly like "no guard rules": count it, and say so once per session.
+  const stats = config.stats ?? {}
+  const bump = (key, message) => {
+    stats[key] = (stats[key] ?? 0) + 1
+    if (message !== undefined) stats.lastError = message
+  }
+  const degraded = new Set() // sessions whose guard chain already failed and was announced
 
   // `signal` is the hook's cancellation: stopping the turn kills the gateway child (or drops the
   // service request) instead of waiting it out.
   const callGateway = async (event, payload, signal) => {
     if (signal?.aborted) return null
+    stats.calls = (stats.calls ?? 0) + 1
     try {
       const stdin = JSON.stringify(payload)
       const { code, out, err } = url
@@ -307,12 +343,20 @@ function registerHooks(ctx, config) {
             signal,
           })
       if (signal?.aborted) return null
-      if (code !== 0) log(`${event} exited ${code}: ${err.trim().slice(0, 500)}`)
+      if (code !== 0) {
+        log(`${event} exited ${code}: ${err.trim().slice(0, 500)}`)
+        bump('failed', `${event} exited ${code}: ${err.trim().slice(0, 300)}`)
+        stats.degraded = true
+      }
       const text = out.trim()
       if (!text) return null
       return JSON.parse(text)
     } catch (e) {
-      if (!signal?.aborted) log(`${event} failed: ${e}`)
+      if (!signal?.aborted) {
+        log(`${event} failed: ${e}`)
+        bump('failed', `${event}: ${e?.message ?? e}`)
+        stats.degraded = true
+      }
       return null
     }
   }
@@ -362,6 +406,7 @@ function registerHooks(ctx, config) {
     const sid = sidOf(agent)
     if (!sid || decision?.kind !== 'enter') return decision
     const typed = (decision.messages ?? messages ?? []).filter((m) => m?.source?.kind === 'user')
+    const failedBefore = stats.failed ?? 0
     let res = null
     if (typed.length > 0) {
       // A message she typed starts a new user turn; our Stop continuation no longer applies.
@@ -374,14 +419,19 @@ function registerHooks(ctx, config) {
     } else if (compacted.delete(sid)) {
       res = await inOrder(sid, () => callGateway('SessionStart', { session_id: sid, source: 'compact' }, signal))
     }
-    if (!res?.context) return decision
-    return { ...decision, messages: [...decision.messages, bannerMessage(res.context, 'Horon Harness')] }
+    const extra = []
+    // The guard chain failed here or during an earlier tool call of this session: say it once.
+    if (degraded.delete(sid) || (stats.failed ?? 0) > failedBefore) extra.push(bannerMessage(GUARD_DOWN, GUARD_DOWN_SUMMARY))
+    if (res?.context) extra.push(bannerMessage(res.context, 'Horon Harness'))
+    if (extra.length === 0) return decision
+    return { ...decision, messages: [...decision.messages, ...extra] }
   })
 
   ctx.on('tools/pre-execute', async (exec, next) => {
     const sid = sidOf(exec?.agent)
     if (sid) {
       const reset = compacted.delete(sid)
+      const failedBefore = stats.failed ?? 0
       const res = await inOrder(sid, () =>
         callGateway('PreToolUse', {
           session_id: sid,
@@ -390,7 +440,11 @@ function registerHooks(ctx, config) {
           ...(reset ? { reset: true } : {}),
         }, exec.signal),
       )
-      if (res?.decision === 'deny') return { kind: 'deny', reason: res.reason || 'Blocked by Horon guard policy.' }
+      if (res?.decision === 'deny') {
+        bump('denied')
+        return { kind: 'deny', reason: res.reason || 'Blocked by Horon guard policy.' }
+      }
+      if ((stats.failed ?? 0) > failedBefore) degraded.add(sid)
     }
     return next()
   }, { prepend: true }) // ahead of permission presets, which may answer without calling next()

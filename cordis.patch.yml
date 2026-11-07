@@ -33,8 +33,10 @@
     - id: dsh-horon
       name: 'dsh-horon'
       config:
-        root: 'C:\Users\xiaoliyue\horon'
-        python: 'C:\Users\xiaoliyue\horon\.venv\Scripts\python.exe'
+        # No root / python here on purpose: a shipped bundle patch is applied on every machine
+        # that installs it, so it may only carry values that are true everywhere. Both default to
+        # ~/horon and <root>/.venv (or PATH `python`); set them in the profile patch if yours
+        # live elsewhere. spawn mode reads them, docker/url modes ignore them.
         port: 8710
         autostart: true
         hooks: true

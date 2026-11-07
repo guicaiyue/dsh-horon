@@ -1,5 +1,5 @@
 # Horon 服务（手写版 compose）。构建上下文随插件发布，先组装再起容器（在本目录下运行）：
-#   node build.mjs [Horon 仓库路径]       # 默认 C:\Users\xiaoliyue\horon，或设 HORON_REPO
+#   node build.mjs [Horon 仓库路径]       # 默认 ~/horon，或设 HORON_REPO
 #   cp env.example "$HORON_DATA_DIR/.env" # 按需填 API key / 代理
 #   docker compose up -d --build
 #

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Assemble the Docker build context for the Horon service, and refresh the plugin's skills/ copy.
 //
-//   node docker/build.mjs [path/to/horon]      (or set HORON_REPO; default C:\Users\xiaoliyue\horon)
+//   node docker/build.mjs [path/to/horon]      (or set HORON_REPO; default ~/horon)
 //
 // Output (both are regenerated from scratch on every run):
 //   docker/context/            build context for docker/Dockerfile
@@ -12,9 +12,12 @@
 //                              plugin's skill provider on hosts without the Horon repository
 //
 // Only an explicit allow-list is copied: no .env, no database, no venv / node_modules, no
-// personal tag plugins, no local scratch directories.
+// personal tag plugins, no local scratch directories. backend/harness/dsh-plugin is left out as
+// well: that is the old "mount it by file:// URL" dsh plugin, and this repository replaces it
+// (harness.js), so a copy inside the image would only be dead weight.
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -23,7 +26,7 @@ const PLUGIN_DIR = path.dirname(DOCKER_DIR)
 const CONTEXT = path.join(DOCKER_DIR, 'context')
 const SKILLS_OUT = path.join(PLUGIN_DIR, 'skills')
 
-const REPO = path.resolve(process.argv[2] ?? process.env.HORON_REPO ?? 'C:\\Users\\xiaoliyue\\horon')
+const REPO = path.resolve(process.argv[2] ?? process.env.HORON_REPO ?? path.join(os.homedir(), 'horon'))
 const SKILLS = ['horon-cli', 'horon-circuit', 'horon-plugin']
 // System tag plugins tracked by the Horon repository (.gitignore whitelist); the rest are personal.
 const TAG_PLUGINS = ['state.py', 'action.py', 'result.py', 'exit.py']
@@ -65,10 +68,14 @@ reset(CONTEXT, DOCKER_DIR)
 const app = path.join(CONTEXT, 'app')
 const web = path.join(CONTEXT, 'web')
 
-// backend/: everything except tag_plugins, which only gets the tracked system plugins.
+// backend/: everything except the two directories handled separately below.
 const backendSrc = path.join(REPO, 'backend')
 const tagPluginsSrc = path.join(backendSrc, 'tag_plugins')
-copy(backendSrc, path.join(app, 'backend'), (source) => keep(source) && !source.startsWith(tagPluginsSrc))
+// The old file://-mounted dsh plugin; harness.js replaces it in this repository.
+const DSH_PLUGIN_SRC = path.join(backendSrc, 'harness', 'dsh-plugin')
+const outsideExcluded = (source) =>
+  ![tagPluginsSrc, DSH_PLUGIN_SRC].some((dir) => source === dir || source.startsWith(dir + path.sep))
+copy(backendSrc, path.join(app, 'backend'), (source) => keep(source) && outsideExcluded(source))
 fs.mkdirSync(path.join(app, 'backend', 'tag_plugins'), { recursive: true })
 for (const file of TAG_PLUGINS) {
   const source = path.join(tagPluginsSrc, file)
