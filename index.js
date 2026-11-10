@@ -157,7 +157,9 @@ function settings(config) {
     artifact,
     // artifact mode keeps the manuals inside the release; registering from the package root means
     // the choices are the same before and after the first download.
-    skills: c.skills ?? (mode !== 'spawn' && mode !== 'artifact'),
+    // On everywhere except spawn mode. artifact mode serves the package copy until the release
+    // is unpacked, then the copy inside it — both come from the same pinned commit.
+    skills: c.skills ?? mode !== 'spawn',
     // Whether anyone has chosen a way to run yet; the client shows the first-run chooser when not.
     // A working local clone counts as a choice, so upgrading an existing spawn-mode install does
     // not suddenly ask the user to pick again.
@@ -797,7 +799,7 @@ export function apply(ctx, config) {
     stats: harnessStats,
   })
   registerConsoleRoute(ctx, config, s)
-  if (s.skills) registerSkills(ctx, s.mode === 'artifact' ? HERE : s.root)
+  if (s.skills) registerSkills(ctx, s.root)
 
   if (s.mode === 'artifact') {
     runService(ctx, {
