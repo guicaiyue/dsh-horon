@@ -22,7 +22,13 @@
     "release": "horon-{commit8}",
     "baseUrl": "https://github.com/guicaiyue/dsh-horon/releases/download/horon-{commit8}",
     "asset": "horon-app-{platform}-{commit8}.tar.gz",
-    "sha256": {}
+    "sha256": {
+      "linux-arm64": "b413eda8929bb70613d0220a09367e5e8fe5daa2127dd4e5f81f621ea2e90217",
+      "linux-x64": "cd203aecd111b78a9021cc664db2e715768c87983ec4db1852087058175ba445",
+      "macos-arm64": "192e8f9b45982b0b46ef687dee8b7f89bddec9d24af30ec9c1929c04d034a360",
+      "macos-x64": "36c771ce36c7d25a60b37e7e341c2869dc6d23c4c902da91dbd8a466559f0eee",
+      "win-x64": "b7f55614cce684e905f2812eaeab96fde0cc0cec03bd48588c924b4b2263a04d"
+    }
   },
   "platforms": [
     "win-x64",
