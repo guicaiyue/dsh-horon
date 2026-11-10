@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "title": {
+    "en": "DSH plugin index",
+    "zh": "DSH 插件索引"
+  },
+  "plugins": [
+    {
+      "name": "dsh-horon",
+      "title": {
+        "en": "Horon memory graph",
+        "zh": "Horon 记忆图谱"
+      },
+      "description": {
+        "en": "Horon memory graph for dsh: the horon tool, lifecycle hooks, a console panel and a one-click service runtime (released build artifact or Docker image).",
+        "zh": "把 Horon 记忆图谱接进 dsh：horon 工具、生命周期钩子、控制台面板，以及一键运行的 Horon 服务（发布构建物或 Docker 镜像）。"
+      },
+      "author": "guicaiyue",
+      "homepage": "https://github.com/guicaiyue/dsh-horon",
+      "repository": {
+        "url": "https://github.com/guicaiyue/dsh-horon"
+      },
+      "versions": [
+        {
+          "version": "1.0.0",
+          "publishTimestamp": 1762732800,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2"
+          }
+        }
+      ]
+    }
+  ]
+}

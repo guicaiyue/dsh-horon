@@ -3,12 +3,16 @@
 // One row (`dsh-horon`) mounts four things:
 //   - the Horon Harness half (harness.js): the `horon` tool, a short memory-policy system-prompt
 //     section, and the dsh lifecycle hooks;
-//   - the Horon service, in one of three modes (config `mode`, guessed from `url` when absent):
-//       spawn   this half runs ONE Python process (`python -m uvicorn horon_web_app:app`) while the
-//               plugin is active and stops it on dispose;
-//       docker  the service is the container docker.js deploys on this host; nothing is spawned,
-//               and `autostart` only starts an existing container (never creates one);
-//       url     the service runs somewhere else and is reached at `url`;
+//   - the Horon service, in one of four modes (config `mode`, guessed from `url` when absent):
+//       artifact  the released build artifact (artifact.js) is downloaded from GitHub Releases,
+//                 checked against horon.lock.json, unpacked under `artifactDir` and run through the
+//                 same spawn path — no repository, no git, no npm, no Docker;
+//       docker    the container of the image named in horon.lock.json, pulled (never built) by
+//                 docker.js; `autostart` only starts an existing container (never creates one);
+//       spawn     this half runs ONE Python process from a local Horon clone (`python -m uvicorn
+//                 horon_web_app:app`) while the plugin is active and stops it on dispose; the
+//                 developer path;
+//       url       the service runs somewhere else and is reached at `url`;
 //   - a `/dsh-horon/` route on the dsh web server that proxies to the service, behind the same
 //     Host/Origin + login fence as dsh's own routes, plus `/dsh-horon/_dsh/*` endpoints that back
 //     the settings page (status, config, preview, deploy, logs);
@@ -26,7 +30,16 @@
 //   hooks          false keeps only the `horon` tool, without the lifecycle hooks
 //   skills         register the Horon skills; default on outside spawn mode. They are read from
 //                  `root/.agents/skills` when it exists, otherwise from skills/ next to this file
-//                  (docker/build.mjs refreshes that copy).
+//                  (scripts/assemble.mjs --skills refreshes that copy at publish time).
+//   Artifact mode (see artifact.js and horon.lock.json):
+//   artifactDir    where releases are unpacked, default ~/.horon/runtime
+//   artifactUrl    override the asset URL (a mirror, or a local file:// path for tests)
+//   artifactBaseUrl  override the release base URL; the asset name comes from horon.lock.json
+//   artifactSha256 override the expected digest for this platform
+//   horonCommit    pin a different Horon commit than horon.lock.json (advanced)
+//   dataDir        shared with docker mode: the database, .env and tag plugins live there, so
+//                  switching between docker and artifact keeps the same memory
+//
 //   Docker mode (every path defaults under the home directory, so one config works on Windows and
 //   Linux; `~` stands for that directory, see docker.js):
 //   dataDir        host directory holding the mounts, default ~/.horon/docker
@@ -35,9 +48,9 @@
 //   tagPluginsDir  tag plugins, default <dataDir>/tag_plugins
 //   dockerBind     host address the container publishes on, default 127.0.0.1
 //   dockerPort     host port, default 8710
-//   image          image tag, default horon-service:local
+//   image          image tag, default <horon.lock.json image.name>:<tag>
 //   container      container name, default horon
-//   buildProxy     passed to the build as BUILD_PROXY (a proxy reachable from the build network)
+//   buildProxy     legacy: images used to be built here. Ignored; kept so old profiles still load.
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -47,6 +60,12 @@ import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  artifactSettings,
+  artifactStatus,
+  defaultArtifactDir,
+  provisionArtifact,
+} from './artifact.js'
 import {
   defaultDataDir,
   deployState,
@@ -67,6 +86,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const DEFAULT_ROOT = defaultRoot()
 // Guard-chain counters filled by harness.js and read by the settings page.
 const harnessStats = { calls: 0, denied: 0, failed: 0, lastError: null, degraded: false }
+// One provisioning run at a time (download + unpack + bootstrap); the page polls /status while it
+// lasts and reads the log from /provision-log.
+const provisioning = { running: false, ok: undefined, error: null, text: '', total: 0, startedAt: undefined, finishedAt: undefined }
+const PROVISION_LOG_LIMIT = 128 * 1024
 const PREFIX = '[dsh-horon]'
 const START_TIMEOUT_MS = 30_000
 // Console route on the dsh web server; client.js builds the iframe URL from the same name.
@@ -78,9 +101,10 @@ const MAX_BODY_BYTES = 512 * 1024
 // Keys the settings page may write into the profile patch.
 const EDITABLE = new Set([
   'mode', 'url', 'autostart', 'dataDir', 'dbFile', 'envFile', 'tagPluginsDir',
-  'dockerBind', 'dockerPort', 'image', 'container', 'buildProxy',
+  'dockerBind', 'dockerPort', 'image', 'container',
+  'artifactDir', 'artifactUrl', 'artifactBaseUrl', 'artifactSha256', 'horonCommit', 'python', 'root',
 ])
-const MODES = new Set(['spawn', 'docker', 'url'])
+const MODES = new Set(['spawn', 'artifact', 'docker', 'url'])
 // BUNDLED_SKILL_RANK of @deepseek-ai/dsh-skill: user (~/.dsh/skills) and project skills win over it.
 const SKILL_RANK = 600
 const SKILL_PROVIDER = 'dsh-horon'
@@ -111,24 +135,36 @@ function settings(config) {
   const declared = text(c.mode)
   // `url` alone has always meant "do not spawn"; it still does.
   const mode =
-    declared === 'docker' || declared === 'spawn' || (declared === 'url' && url !== undefined)
+    declared === 'docker' || declared === 'spawn' || declared === 'artifact' || (declared === 'url' && url !== undefined)
       ? declared
       : url !== undefined
         ? 'url'
         : 'spawn'
   const docker = dockerSettings(c)
-  const root = c.root ?? DEFAULT_ROOT
+  const artifact = artifactSettings(c)
+  // artifact mode owns its own interpreter: the venv bootstrap created inside the release.
+  const root = mode === 'artifact' ? artifact.appDir : c.root ?? DEFAULT_ROOT
   return {
     mode,
     root,
-    // The venv next to the repository when it exists, so a fresh clone needs no `python` either.
+    // The venv next to the root when it exists, so a fresh clone needs no `python` either.
     python: text(c.python) ?? defaultPython(root),
     host,
     port,
     autostart: c.autostart !== false,
     url,
     docker,
-    skills: c.skills ?? mode !== 'spawn',
+    artifact,
+    // artifact mode keeps the manuals inside the release; registering from the package root means
+    // the choices are the same before and after the first download.
+    skills: c.skills ?? (mode !== 'spawn' && mode !== 'artifact'),
+    // Whether anyone has chosen a way to run yet; the client shows the first-run chooser when not.
+    // A working local clone counts as a choice, so upgrading an existing spawn-mode install does
+    // not suddenly ask the user to pick again.
+    chosen:
+      declared !== undefined ||
+      url !== undefined ||
+      existsSync(path.join(c.root ?? DEFAULT_ROOT, 'frontend', 'cli.py')),
     // Where this host reaches the service: the configured one, or the one it starts.
     base: mode === 'url' ? url : mode === 'docker' ? docker.base : `http://${urlHost(host)}:${port}`,
   }
@@ -305,7 +341,7 @@ function cleanInput(input) {
       out.dockerPort = port
       continue
     }
-    if (key === 'mode' && !MODES.has(value)) throw httpError(400, 'mode must be spawn, docker or url')
+    if (key === 'mode' && !MODES.has(value)) throw httpError(400, 'mode must be spawn, artifact, docker or url')
     out[key] = String(value).trim()
   }
   return out
@@ -369,7 +405,13 @@ function readableConfig(config) {
     dockerPort: c.dockerPort,
     image: c.image,
     container: c.container,
-    buildProxy: c.buildProxy,
+    artifactDir: c.artifactDir,
+    artifactUrl: c.artifactUrl,
+    artifactBaseUrl: c.artifactBaseUrl,
+    artifactSha256: c.artifactSha256,
+    horonCommit: c.horonCommit,
+    python: c.python,
+    root: c.root,
   }
 }
 
@@ -389,6 +431,22 @@ function describeResolved(d) {
   }
 }
 
+function describeArtifact(a) {
+  return {
+    platform: a.platform,
+    commit: a.commit,
+    commit8: a.commit8,
+    dir: a.dir,
+    root: a.root,
+    asset: a.asset,
+    url: a.url,
+    sha256: a.sha256 || undefined,
+    dataDir: a.dataDir,
+    pinned: a.lock?.horon?.commit,
+    image: a.lock?.image ? `${a.lock.image.name}:${a.lock.image.tag}` : undefined,
+  }
+}
+
 async function describeConfig(ctx, config) {
   const s = settings(config)
   let editable = false
@@ -402,11 +460,16 @@ async function describeConfig(ctx, config) {
     config: readableConfig(config),
     mode: s.mode,
     base: s.base,
+    // Nobody has picked a way to run yet: the client shows the first-run chooser.
+    onboarding: !s.chosen,
     editable,
     platform: process.platform,
     home: os.homedir(),
     defaultDataDir: defaultDataDir(),
+    defaultArtifactDir: defaultArtifactDir(),
     resolved: describeResolved(s.docker),
+    artifact: describeArtifact(s.artifact),
+    artifactState: await artifactStatus(s.artifact),
     texts: await renderTexts(s.docker),
   }
 }
@@ -419,18 +482,79 @@ async function previewConfig(config, input) {
   return { resolved: describeResolved(d), base: d.base, serving, texts }
 }
 
+// ---- artifact provisioning ---------------------------------------------------------------------
+
+function say(text) {
+  provisioning.text += text
+  provisioning.total += text.length
+  if (provisioning.text.length > PROVISION_LOG_LIMIT) provisioning.text = provisioning.text.slice(-PROVISION_LOG_LIMIT)
+}
+
+export function provisionState(since = 0) {
+  const kept = provisioning.total - provisioning.text.length
+  const from = Math.min(Math.max(Number(since) || 0, kept), provisioning.total)
+  return {
+    running: provisioning.running,
+    ok: provisioning.ok,
+    error: provisioning.error,
+    total: provisioning.total,
+    from,
+    text: provisioning.text.slice(from - kept),
+  }
+}
+
+function startProvision(a) {
+  if (provisioning.running) {
+    const error = new Error('a provisioning run is already in progress')
+    error.status = 409
+    throw error
+  }
+  provisioning.running = true
+  provisioning.ok = undefined
+  provisioning.error = null
+  provisioning.text = ''
+  provisioning.total = 0
+  provisioning.startedAt = Date.now()
+  provisioning.finishedAt = undefined
+  say(`# Horon artifact  ${new Date().toISOString()}\n`)
+  say(`platform ${a.platform} · commit ${a.commit.slice(0, 8)} · target ${a.root}\n`)
+  void provisionArtifact(a, say)
+    .then(
+      (prepared) => {
+        provisioning.ok = true
+        say(`\nruntime: ${prepared.python}\nroot:    ${prepared.root}\n`)
+      },
+      (error) => {
+        provisioning.ok = false
+        provisioning.error = String(error?.message ?? error)
+        say(`\n${provisioning.error}\n`)
+      },
+    )
+    .finally(() => {
+      provisioning.running = false
+      provisioning.finishedAt = Date.now()
+    })
+  return provisionState()
+}
+
 async function handleApi(ctx, config, s, req, res, incoming) {
   const action = incoming.pathname.slice(API_PREFIX.length).replace(/\/+$/, '')
   const method = req.method ?? 'GET'
   try {
     if (action === 'status' && method === 'GET') {
-      const [serving, docker] = await Promise.all([isServing(s.base, 1500), dockerStatus(s.docker)])
+      const [serving, docker, artifact] = await Promise.all([
+        isServing(s.base, 1500),
+        dockerStatus(s.docker),
+        artifactStatus(s.artifact),
+      ])
       sendJson(res, 200, {
         mode: s.mode,
         base: s.base,
         serving,
         deploying: isDeploying(),
+        provisioning: provisioning.running,
         docker,
+        artifact,
         // Whether tool calls are actually being checked by Horon's guard circuits right now.
         hooks: {
           enabled: (config ?? {}).hooks !== false,
@@ -469,6 +593,17 @@ async function handleApi(ctx, config, s, req, res, incoming) {
     }
     if (action === 'logs' && method === 'GET') {
       sendJson(res, 200, deployState(Number(incoming.searchParams.get('since') ?? 0)))
+      return
+    }
+    // artifact mode: download + unpack + bootstrap, streamed into the same log viewer shape.
+    if (action === 'provision' && method === 'POST') {
+      const body = (await readJson(req)) ?? {}
+      const a = artifactSettings({ ...(config ?? {}), ...cleanInput(body.config) })
+      sendJson(res, 200, startProvision(a))
+      return
+    }
+    if (action === 'provision-log' && method === 'GET') {
+      sendJson(res, 200, provisionState(Number(incoming.searchParams.get('since') ?? 0)))
       return
     }
     sendJson(res, 404, { error: `unknown endpoint: ${method} ${action}` })
@@ -538,7 +673,7 @@ function registerSkills(ctx, root) {
 
 // ---- service lifecycle (spawn mode) ----------------------------------------------------------
 
-function runService(ctx, { root, python, host, port, autostart, base }) {
+function runService(ctx, { root, python, host, port, autostart, base, prepare }) {
   ctx.effect(() => {
     let child = null
     let stopped = false
@@ -581,24 +716,44 @@ function runService(ctx, { root, python, host, port, autostart, base }) {
       }
       if (stopped) return
 
+      // artifact mode: fetch + unpack + bootstrap the released tree before anything is spawned.
+      // A failure here leaves the service down but must not take the plugin (or dsh) with it.
+      let serviceRoot = root
+      let servicePython = python
+      if (prepare !== undefined) {
+        try {
+          const prepared = await prepare()
+          if (stopped) return
+          if (prepared?.root) serviceRoot = prepared.root
+          if (prepared?.python) servicePython = prepared.python
+        } catch (error) {
+          log(`the service runtime is not ready: ${error?.message ?? error}`)
+          log('open Settings → Horon service and press Deploy, or choose another mode')
+          return
+        }
+      }
+
       const env = {
         ...process.env,
         PYTHONUTF8: '1',
         PYTHONIOENCODING: 'utf-8',
-        // The launcher lives here; `backend.*` resolves from the Horon root.
-        PYTHONPATH: [HERE, root, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
-        HORON_ROOT: root,
+        // The launcher lives here; `backend.*` resolves from the Horon root. `vendor/` covers the
+        // bootstrap fallback for hosts without the venv module.
+        PYTHONPATH: [HERE, serviceRoot, path.join(serviceRoot, 'vendor'), process.env.PYTHONPATH]
+          .filter(Boolean)
+          .join(path.delimiter),
+        HORON_ROOT: serviceRoot,
       }
 
       let spawned
       try {
         spawned = spawn(
-          python,
+          servicePython,
           ['-m', 'uvicorn', 'horon_web_app:app', '--host', host, '--port', String(port), '--log-level', 'warning'],
-          { cwd: root, env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+          { cwd: serviceRoot, env, shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
         )
       } catch (error) {
-        log(`could not start ${python}: ${error?.message ?? error}`)
+        log(`could not start ${servicePython}: ${error?.message ?? error}`)
         return
       }
 
@@ -640,8 +795,16 @@ export function apply(ctx, config) {
     stats: harnessStats,
   })
   registerConsoleRoute(ctx, config, s)
-  if (s.skills) registerSkills(ctx, s.root)
+  if (s.skills) registerSkills(ctx, s.mode === 'artifact' ? HERE : s.root)
 
+  if (s.mode === 'artifact') {
+    runService(ctx, {
+      ...s,
+      // Downloaded once per pinned commit, then reused: the second start is a plain spawn.
+      prepare: () => provisionArtifact(s.artifact, log),
+    })
+    return
+  }
   if (s.mode === 'docker') {
     if (s.autostart) void ensureContainer(s.docker, log).catch((error) => log(`docker: ${error?.message ?? error}`))
     else log(`autostart is off; container ${s.docker.container} is left as it is`)
@@ -651,6 +814,11 @@ export function apply(ctx, config) {
     void isServing(s.base, 3000).then((up) =>
       log(up ? `using the Horon service at ${s.base}` : `the Horon service at ${s.base} did not answer yet`),
     )
+    return
+  }
+  if (!s.chosen) {
+    // Fresh install: nothing is started until the user picks a runtime in the Horon panel.
+    log('no runtime chosen yet; open the Horon panel to download the artifact or pull the image')
     return
   }
   runService(ctx, s)

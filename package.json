@@ -1,8 +1,16 @@
 {
   "name": "dsh-horon",
   "version": "1.0.0",
-  "private": true,
+  "description": "Horon memory graph as a DeepSeek Harness plugin: the horon tool, lifecycle hooks, the console panel and a one-click service runtime (released artifact or Docker image)",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guicaiyue/dsh-horon.git"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.2"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -14,20 +22,23 @@
     "harness.js",
     "client.js",
     "docker.js",
+    "artifact.js",
     "horon_web_app.py",
+    "horon.lock.json",
     "cordis.patch.yml",
+    "scripts/bootstrap.py",
     "locale/*.json",
     "icon.svg",
     "skills/*/SKILL.md",
     "docker/Dockerfile",
-    "docker/docker-compose.yml",
     "docker/entrypoint.sh",
-    "docker/build.mjs",
     "docker/requirements.lock.txt",
-    "docker/env.example",
-    "docker/.dockerignore",
-    "docker/context/**"
+    "docker/env.example"
   ],
+  "scripts": {
+    "test": "node test/host-smoke.mjs",
+    "assemble": "node scripts/assemble.mjs"
+  },
   "dsh": {
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {

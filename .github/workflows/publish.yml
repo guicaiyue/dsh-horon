@@ -1,0 +1,45 @@
+name: publish
+
+# Publish the plugin itself (not the image, not the artifacts) on a version tag:
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# The Horon manuals do not live in this repository; they are copied from the pinned commit into
+# skills/ first, which is git-ignored and only ever exists in the published tarball.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - id: pin
+        run: |
+          echo "sha=$(jq -r .horon.commit horon.lock.json)" >> "$GITHUB_OUTPUT"
+          echo "repo=$(jq -r .horon.repo horon.lock.json | sed -E 's#^https://github.com/##; s#\.git$##')" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: horon
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      - name: skills from the pinned commit
+        run: node scripts/assemble.mjs --repo horon --out .build/ctx --skills
+      - name: version matches the tag
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          actual=$(jq -r .version package.json)
+          if [ "$tagged" != "$actual" ]; then
+            echo "tag $GITHUB_REF_NAME does not match package.json $actual"; exit 1
+          fi
+      - run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

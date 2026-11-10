@@ -42,11 +42,30 @@ window.__ModuleLoader__.load({
       loading: '正在读取配置…',
       mode: '运行方式',
       modeSpawn: '本机进程（python -m uvicorn）',
+      modeArtifact: '构建物（免 Docker）',
       modeDocker: 'Docker 容器（本机）',
       modeUrl: '远端服务（只填 URL）',
-      modeHintSpawn: '由 dsh 自己拉起 Horon（需要本机 Python 环境和 Horon 仓库）。',
+      modeHintSpawn: '由 dsh 自己拉起 Horon（需要本机 Python 环境和 Horon 仓库），开发时用。',
+      modeHintArtifact: '下载 CI 发布的构建物（后端 + 打包好的控制台 + 依赖轮子），解包到本机直接跑：不需要 Horon 仓库，也不需要 git / npm / Docker。',
       modeHintDocker: 'Horon 跑在本机 Docker 容器里，数据全部挂载到下面这些宿主机目录。',
       modeHintUrl: 'Horon 跑在别处，这里只记住地址；不启动也不部署。',
+      artifact: '构建物',
+      artifactHint: '按 horon.lock.json 锁定的 commit 和当前平台下载；换版本解包到新目录，旧版本留着可回滚。',
+      artifactDir: '构建物目录',
+      artifactDirHint: '默认：{def}',
+      artifactUrl: '构建物地址（可选）',
+      artifactUrlHint: '留空用 horon.lock.json 里的发布地址；也可以填镜像站或本地路径。',
+      artifactState: '构建物状态',
+      artifactMissing: '未下载',
+      artifactReady: '已就绪',
+      artifactPending: '已解包，运行时未装好',
+      artifactPin: '锁定',
+      provision: '下载并安装',
+      provisioning: '下载安装中…',
+      provisionNote: '按锁定 commit 下载、校验 sha256、解包，再用自带的轮子离线装依赖。',
+      provisionDone: '构建物已就绪，服务正在启动。',
+      provisionFailed: '下载或安装失败，原因见日志。',
+      dataDirShared: '数据目录与 Docker 模式共用：数据库、.env、tag 插件都在这里，切换运行方式不会丢记忆。',
       url: '服务地址',
       urlHint: '例如 http://127.0.0.1:8710。服务本身没有鉴权，只应放在可信网络里。',
       autostart: '启动 dsh 时自动拉起',
@@ -68,8 +87,6 @@ window.__ModuleLoader__.load({
       portHint: '默认 8710',
       image: '镜像',
       container: '容器名',
-      buildProxy: '构建代理',
-      buildProxyHint: '例如 http://host.docker.internal:7890；留空表示直连',
 
       applied: '实际生效',
       home: '用户目录',
@@ -85,7 +102,7 @@ window.__ModuleLoader__.load({
 
       deploy: '一键部署',
       deploying: '部署中…',
-      deployNote: '在本机执行 docker build 和 docker run。构建上下文随插件发布，不需要 Horon 仓库。',
+      deployNote: '在本机 docker pull 官方镜像再 docker run。镜像由 CI 按锁定 commit 构建，本机不构建。',
       deployLog: '部署日志',
       deployDone: '部署完成，服务已就绪。',
       deployFailed: '部署失败，原因见上面的日志。',
@@ -96,7 +113,15 @@ window.__ModuleLoader__.load({
       tabCompose: 'compose',
       tabDockerfile: 'Dockerfile',
       tabEnv: '.env 示例',
-      noContext: '构建上下文还没生成：在插件目录运行 node docker/build.mjs <Horon 仓库路径>。',
+      noContext: '镜像还没拉下来：点「一键部署」拉取即可。',
+
+      onboardingTitle: '先选一种运行方式',
+      onboardingNote: 'Horon 服务需要一个运行时。选一种装好就能用；之后可在「设置 → Horon 服务」里随时改。',
+      onboardingArtifact: '下载构建物（要 Python 3.12，不要 Docker）',
+      onboardingDocker: '拉取 Docker 镜像（要本机 Docker）',
+      onboardingLater: '稍后再说',
+      onboardingSize: '构建物约 40 MB；镜像约 250 MB。两种方式的数据目录相同，随时可以换。',
+      onboardingWorking: '正在安装，进度见「设置 → Horon 服务」的日志。',
 
       statusServing: '服务可访问',
       statusDown: '服务不可访问',
@@ -124,11 +149,30 @@ window.__ModuleLoader__.load({
       loading: 'Loading the settings…',
       mode: 'Mode',
       modeSpawn: 'Local process (python -m uvicorn)',
+      modeArtifact: 'Build artifact (no Docker)',
       modeDocker: 'Docker container (this host)',
       modeUrl: 'Remote service (URL only)',
-      modeHintSpawn: 'dsh starts Horon itself; needs a local Python environment and the Horon repository.',
+      modeHintSpawn: 'dsh starts Horon itself from a local clone; the developer path.',
+      modeHintArtifact: 'Downloads the artifact CI released (backend + built console + pinned wheels) and runs it here: no Horon repository, no git, no npm, no Docker.',
       modeHintDocker: 'Horon runs in a container on this host; everything below is bind-mounted from the host.',
       modeHintUrl: 'Horon runs elsewhere; only the address is remembered. Nothing is started or deployed.',
+      artifact: 'Build artifact',
+      artifactHint: 'Downloaded for the commit pinned in horon.lock.json and this platform; a new version unpacks next to the old one, so rolling back is a config change.',
+      artifactDir: 'Artifact directory',
+      artifactDirHint: 'Default: {def}',
+      artifactUrl: 'Artifact URL (optional)',
+      artifactUrlHint: 'Empty uses the release URL in horon.lock.json; a mirror or a local path works too.',
+      artifactState: 'Artifact state',
+      artifactMissing: 'not downloaded',
+      artifactReady: 'ready',
+      artifactPending: 'unpacked, runtime not installed',
+      artifactPin: 'pinned',
+      provision: 'Download and install',
+      provisioning: 'Downloading…',
+      provisionNote: 'Downloads the pinned commit, verifies sha256, unpacks it and installs the runtime from the bundled wheels, offline.',
+      provisionDone: 'The artifact is ready; the service is starting.',
+      provisionFailed: 'The download or install failed; see the log.',
+      dataDirShared: 'The data directory is shared with Docker mode: database, .env and tag plugins stay put when you switch.',
       url: 'Service URL',
       urlHint: 'For example http://127.0.0.1:8710. The service has no auth of its own, so keep it inside a trusted network.',
       autostart: 'Start it when dsh starts',
@@ -150,8 +194,6 @@ window.__ModuleLoader__.load({
       portHint: 'Default 8710',
       image: 'Image',
       container: 'Container name',
-      buildProxy: 'Build proxy',
-      buildProxyHint: 'For example http://host.docker.internal:7890; empty means a direct connection',
 
       applied: 'In effect',
       home: 'Home directory',
@@ -167,7 +209,7 @@ window.__ModuleLoader__.load({
 
       deploy: 'Deploy now',
       deploying: 'Deploying…',
-      deployNote: 'Runs docker build and docker run on this host. The build context ships with the plugin, so the Horon repository is not needed.',
+      deployNote: 'Pulls the official image and runs the container here. CI builds it from the pinned commit; nothing is built locally.',
       deployLog: 'Deploy log',
       deployDone: 'Deployed; the service is up.',
       deployFailed: 'The deploy failed; see the log above.',
@@ -178,7 +220,15 @@ window.__ModuleLoader__.load({
       tabCompose: 'compose',
       tabDockerfile: 'Dockerfile',
       tabEnv: '.env example',
-      noContext: 'The build context has not been generated yet: run node docker/build.mjs <Horon repo> in the plugin directory.',
+      noContext: 'The image has not been pulled yet: press Deploy now.',
+
+      onboardingTitle: 'Choose how to run it',
+      onboardingNote: 'The Horon service needs a runtime. Pick one and it is ready; you can change it later under Settings → Horon service.',
+      onboardingArtifact: 'Download the artifact (Python 3.12, no Docker)',
+      onboardingDocker: 'Pull the Docker image (needs Docker here)',
+      onboardingLater: 'Not now',
+      onboardingSize: 'The artifact is about 40 MB, the image about 250 MB. Both use the same data directory, so switching keeps your memory.',
+      onboardingWorking: 'Installing; the log is under Settings → Horon service.',
 
       statusServing: 'Service reachable',
       statusDown: 'Service unreachable',
@@ -239,6 +289,54 @@ window.__ModuleLoader__.load({
       const t = props.t ?? ((key) => key)
       const [ready, setReady] = React.useState(false)
       const [attempt, setAttempt] = React.useState(0)
+      // First run: nobody has chosen a runtime yet, so the panel asks before showing a spinner.
+      const [onboarding, setOnboarding] = React.useState(undefined)
+      const [choice, setChoice] = React.useState(undefined)
+      const [choiceNote, setChoiceNote] = React.useState(undefined)
+
+      React.useEffect(() => {
+        let cancelled = false
+        api('/config')
+          .then((payload) => {
+            if (!cancelled) setOnboarding(payload.onboarding === true)
+          })
+          .catch(() => {})
+        return () => {
+          cancelled = true
+        }
+      }, [])
+
+      // Poll a job until it stops; the log itself is shown in Settings.
+      const waitJob = async (path) => {
+        for (let i = 0; i < 1800; i += 1) {
+          const state = await api(path)
+          if (state.running !== true) return state
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+        }
+        return undefined
+      }
+
+      const choose = async (kind) => {
+        setChoice(kind)
+        setChoiceNote(undefined)
+        try {
+          if (kind === 'artifact') {
+            await api('/provision', { method: 'POST', body: { config: { mode: 'artifact' } } })
+            await waitJob('/provision-log')
+          } else {
+            await api('/deploy', { method: 'POST', body: { config: { mode: 'docker' } } })
+            await waitJob('/logs')
+          }
+          // Saving the mode remounts the plugin, which starts the service the chosen way.
+          await api('/config', { method: 'POST', body: { config: { mode: kind } } })
+          setOnboarding(false)
+          setAttempt((value) => value + 1)
+        } catch (caught) {
+          setChoiceNote(String(caught?.message ?? caught))
+        } finally {
+          setChoice(undefined)
+        }
+      }
 
       // Probe until the Host half's service answers, then stop polling.
       React.useEffect(() => {
@@ -260,6 +358,28 @@ window.__ModuleLoader__.load({
           clearTimeout(timer)
         }
       }, [attempt])
+
+      if (!ready && onboarding === true) {
+        const card = { background: 'var(--dsw-alias-bg-layer-1)', border: '0.5px solid var(--dsw-alias-border-l2)', borderRadius: 'var(--dsw-radius-md, 8px)', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '420px', font: 'var(--dsw-font-xs-13)' }
+        const primary = { cursor: choice === undefined ? 'pointer' : 'not-allowed', opacity: choice === undefined ? 1 : 0.6, color: 'var(--dsw-alias-label-primary-foreground)', background: 'var(--dsw-alias-button-primary-fill)', border: '0.5px solid var(--dsw-alias-button-primary-fill)', borderRadius: 'var(--dsw-radius-sm)', font: 'inherit', padding: '7px 14px' }
+        const secondary = { cursor: choice === undefined ? 'pointer' : 'not-allowed', color: 'var(--dsw-alias-label-primary)', background: 'var(--dsw-alias-bg-layer-1)', border: '0.5px solid var(--dsw-alias-border-l2)', borderRadius: 'var(--dsw-radius-sm)', font: 'inherit', padding: '7px 14px' }
+        return h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '24px', background: 'var(--dsw-alias-bg-base)' } },
+          h(
+            'div',
+            { style: card },
+            h('div', { style: { color: 'var(--dsw-alias-label-primary)', fontWeight: 600 } }, t('onboardingTitle')),
+            h('div', { style: { color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 } }, t('onboardingNote')),
+            h('button', { type: 'button', style: primary, disabled: choice !== undefined, onClick: () => choose('artifact') }, t('onboardingArtifact')),
+            h('button', { type: 'button', style: secondary, disabled: choice !== undefined, onClick: () => choose('docker') }, t('onboardingDocker')),
+            h('div', { style: { color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.6 } }, t('onboardingSize')),
+            choice === undefined ? null : h('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, t('onboardingWorking')),
+            choiceNote === undefined ? null : h('div', { style: { color: 'var(--dsw-alias-state-error-primary)', lineHeight: 1.6 } }, choiceNote),
+            h('button', { type: 'button', style: { ...secondary, alignSelf: 'flex-start', border: 'none', color: 'var(--dsw-alias-label-tertiary)' }, disabled: choice !== undefined, onClick: () => setOnboarding(false) }, t('onboardingLater')),
+          ),
+        )
+      }
 
       if (!ready) {
         return h(
@@ -415,7 +535,6 @@ window.__ModuleLoader__.load({
     const DEFAULTS = {
       dockerBind: '127.0.0.1',
       dockerPort: '8710',
-      image: 'horon-service:local',
       container: 'horon',
     }
 
@@ -432,6 +551,7 @@ window.__ModuleLoader__.load({
       const [preview, setPreview] = React.useState(undefined)
       const [tab, setTab] = React.useState('commands')
       const [deploy, setDeploy] = React.useState(undefined)
+      const [jobKind, setJobKind] = React.useState('deploy')
       const [copyRequest, setCopyRequest] = React.useState(undefined)
       const [copyNote, setCopyNote] = React.useState(undefined)
 
@@ -493,13 +613,14 @@ window.__ModuleLoader__.load({
         }
       }, [draft])
 
-      // Tail the deploy log while a deploy runs.
+      // Tail the running job's log (deploy for docker mode, provision for artifact mode).
       const running = deploy?.running === true
+      const jobPath = jobKind === 'provision' ? '/provision-log' : '/logs'
       React.useEffect(() => {
         if (!running) return undefined
         let cancelled = false
         const timer = setInterval(() => {
-          api(`/logs?since=${String(since.current)}`)
+          api(`${jobPath}?since=${String(since.current)}`)
             .then((state) => {
               if (cancelled) return
               setDeploy((current) => {
@@ -514,7 +635,7 @@ window.__ModuleLoader__.load({
           cancelled = true
           clearInterval(timer)
         }
-      }, [running])
+      }, [running, jobPath])
 
       // Clipboard fallback: an http origin is not a secure context, so
       // navigator.clipboard may be missing and the copy has to go through a
@@ -571,7 +692,23 @@ window.__ModuleLoader__.load({
         setNotice(undefined)
         try {
           since.current = 0
+          setJobKind('deploy')
           const state = await api('/deploy', { method: 'POST', body: { config: draft } })
+          since.current = state.total ?? 0
+          setDeploy(state)
+        } catch (caught) {
+          setError(caught.message)
+        }
+      }
+
+      // artifact mode: download + unpack + bootstrap, then the mount-time spawn picks it up.
+      const provisionNow = async () => {
+        setError(undefined)
+        setNotice(undefined)
+        try {
+          since.current = 0
+          setJobKind('provision')
+          const state = await api('/provision', { method: 'POST', body: { config: draft } })
           since.current = state.total ?? 0
           setDeploy(state)
         } catch (caught) {
@@ -622,6 +759,7 @@ window.__ModuleLoader__.load({
               'select',
               { className: 'dshhw-select', value: mode, onChange: (event) => update({ mode: event.target.value }) },
               h('option', { value: 'spawn' }, t('modeSpawn')),
+              h('option', { value: 'artifact' }, t('modeArtifact')),
               h('option', { value: 'docker' }, t('modeDocker')),
               h('option', { value: 'url' }, t('modeUrl')),
             ),
@@ -646,8 +784,44 @@ window.__ModuleLoader__.load({
             t('autostart'),
           ),
         ),
-        h('div', { className: 'dshhw-note' }, mode === 'docker' ? t('modeHintDocker') : mode === 'url' ? t('modeHintUrl') : t('modeHintSpawn')),
+        h('div', { className: 'dshhw-note' }, mode === 'artifact' ? t('modeHintArtifact') : mode === 'docker' ? t('modeHintDocker') : mode === 'url' ? t('modeHintUrl') : t('modeHintSpawn')),
         mode === 'url' ? h('div', { className: 'dshhw-hint' }, t('urlHint')) : null,
+
+        // Artifact mode: the released tree, its pin, and where it lands.
+        mode === 'artifact'
+          ? h(
+              'div',
+              { className: 'dshhw-section' },
+              h('h4', null, t('artifact')),
+              h('div', { className: 'dshhw-note' }, t('artifactHint')),
+              h(TextField, {
+                label: t('artifactDir'),
+                value: draft.artifactDir,
+                placeholder: data?.artifact?.dir ?? data?.defaultArtifactDir ?? '',
+                hint: t('artifactDirHint', { def: data?.defaultArtifactDir ?? data?.artifact?.dir ?? '' }),
+                onChange: (value) => update({ artifactDir: value }),
+              }),
+              h(TextField, {
+                label: t('artifactUrl'),
+                value: draft.artifactUrl,
+                placeholder: data?.artifact?.url ?? '',
+                hint: t('artifactUrlHint'),
+                onChange: (value) => update({ artifactUrl: value }),
+              }),
+              h(
+                'div',
+                { className: 'dshhw-hint' },
+                `${t('artifactPin')}: ${(data?.artifact?.commit ?? '').slice(0, 8)} · ${data?.artifact?.platform ?? ''} · ${t('artifactState')}: ${
+                  data?.artifactState?.ready === true
+                    ? t('artifactReady')
+                    : data?.artifactState?.installed === true
+                      ? t('artifactPending')
+                      : t('artifactMissing')
+                }`,
+              ),
+              h('div', { className: 'dshhw-hint' }, t('dataDirShared')),
+            )
+          : null,
 
         h(
           'div',
@@ -737,7 +911,7 @@ window.__ModuleLoader__.load({
             h(TextField, {
               label: t('image'),
               value: draft.image,
-              placeholder: DEFAULTS.image,
+              placeholder: texts.image ?? '',
               width: '200px',
               onChange: (value) => update({ image: value }),
             }),
@@ -749,13 +923,6 @@ window.__ModuleLoader__.load({
               onChange: (value) => update({ container: value }),
             }),
           ),
-          h(TextField, {
-            label: t('buildProxy'),
-            value: draft.buildProxy,
-            placeholder: 'http://host.docker.internal:7890',
-            hint: t('buildProxyHint'),
-            onChange: (value) => update({ buildProxy: value }),
-          }),
           h('div', { className: 'dshhw-hint' }, `${t('home')}: ${data?.home ?? ''} · ${t('platform')}: ${data?.platform ?? ''}`),
           h('div', { className: 'dshhw-hint' }, `${t('applied')}: ${resolved.dataDir ?? ''} → ${resolved.base ?? ''}`),
           bindIsLoopback ? null : h('div', { className: 'dshhw-warn' }, t('bindWarning')),
@@ -776,8 +943,19 @@ window.__ModuleLoader__.load({
             h('span', { className: 'dshhw-spacer' }),
             h(
               'button',
-              { type: 'button', className: 'dshhw-btn', disabled: running || texts.contextReady === false, onClick: deployNow },
-              running ? t('deploying') : t('deploy'),
+              {
+                type: 'button',
+                className: 'dshhw-btn',
+                disabled: running || (mode !== 'artifact' && texts.contextReady === false),
+                onClick: mode === 'artifact' ? provisionNow : deployNow,
+              },
+              running
+                ? mode === 'artifact'
+                  ? t('provisioning')
+                  : t('deploying')
+                : mode === 'artifact'
+                  ? t('provision')
+                  : t('deploy'),
             ),
           ),
           data?.editable === false ? h('div', { className: 'dshhw-warn' }, t('editBlocked')) : null,
@@ -785,8 +963,8 @@ window.__ModuleLoader__.load({
           notice === undefined ? null : h('div', { className: 'dshhw-ok' }, notice),
         ),
 
-        // Copyable deploy material
-        h(
+        // Copyable deploy material; artifact mode has nothing to copy, its action is on the button.
+        mode === 'artifact' ? null : h(
           'div',
           { className: 'dshhw-section' },
           h(
@@ -840,10 +1018,10 @@ window.__ModuleLoader__.load({
                 h('h4', null, t('deployLog')),
                 h('span', { className: 'dshhw-spacer' }),
                 running
-                  ? h('span', { className: 'dshhw-note' }, t('deploying'))
+                  ? h('span', { className: 'dshhw-note' }, jobKind === 'provision' ? t('provisioning') : t('deploying'))
                   : deploy.ok === true
-                    ? h('span', { className: 'dshhw-ok' }, t('deployDone'))
-                    : h('span', { className: 'dshhw-error' }, t('deployFailed')),
+                    ? h('span', { className: 'dshhw-ok' }, jobKind === 'provision' ? t('provisionDone') : t('deployDone'))
+                    : h('span', { className: 'dshhw-error' }, jobKind === 'provision' ? t('provisionFailed') : t('deployFailed')),
               ),
               h('pre', { className: 'dshhw-code dshhw-log' }, deploy.text ?? ''),
             ),

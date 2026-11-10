@@ -2,41 +2,52 @@
 # lifecycle hooks, plus the Client half that adds the sidebar entry, the panel and
 # the Settings page section.
 #
-# Three ways to run the Horon service (see the header of index.js). The settings
-# page (Settings → Horon service) writes this same block for you; by hand:
-#   - spawn mode (the default below): the plugin starts `root`'s Horon with `python`.
-#   - docker mode: the service is the container deployed from the plugin's docker/
-#     context. Nothing is spawned; `autostart` only runs `docker start` on an
-#     existing container. `root`/`python`/`host`/`port` are ignored.
+# Four ways to run the Horon service (see the header of index.js). None of them needs a
+# Horon repository that this plugin did not download itself, and none of them builds anything:
+#   - artifact mode: download the build artifact CI released for the commit pinned in
+#     horon.lock.json, verify its sha256, unpack it under `artifactDir`, and run it. Needs
+#     Python 3.12 only — no git, no npm, no Docker.
+#       config:
+#         mode: artifact
+#         autostart: true
+#         hooks: true
+#     Optional (defaults shown; `~` is the home directory of whoever runs dsh):
+#         artifactDir: '~/.horon/runtime'
+#         artifactUrl: ''        # a mirror or a local path; empty uses horon.lock.json
+#         dataDir: '~/.horon/docker'   # shared with docker mode: database, .env, tag plugins
+#   - docker mode: pull the image named in horon.lock.json (CI built it from the same commit) and
+#     run it. Data is bind-mounted from `dataDir`.
 #       config:
 #         mode: docker
 #         autostart: true
 #         hooks: true
-#     Optional (defaults shown; `~` is the home directory of whoever runs dsh):
-#         dataDir: '~/.horon/docker'          # holds the three mounts below
-#         dbFile: '~/.horon/docker/data/horon.db'   # its directory is mounted at /data
+#     Optional (defaults shown):
+#         dataDir: '~/.horon/docker'
+#         dbFile: '~/.horon/docker/data/horon.db'
 #         envFile: '~/.horon/docker/.env'
 #         tagPluginsDir: '~/.horon/docker/tag_plugins'
 #         dockerBind: '127.0.0.1'             # the service has no auth: keep it on loopback
 #         dockerPort: 8710
-#         image: 'horon-service:local'
+#         image: '<horon.lock.json image.name>:<tag>'
 #         container: 'horon'
-#         buildProxy: 'http://host.docker.internal:7890'   # only when the build needs a proxy
+#   - spawn mode (the default below, for development): the plugin starts `root`'s Horon with
+#     `python`. Only intended for a local clone at `~/horon`.
 #   - url mode: set `url` to a running Horon service elsewhere; nothing is started.
 #       config:
 #         url: 'http://127.0.0.1:8710'
 #         hooks: true
 #   Optional in every mode:
 #       skills: true        # register horon-cli / horon-circuit / horon-plugin as skills
-#                           # (default on outside spawn mode)
+#                           # (default on outside spawn and artifact modes)
+#
+# No `mode` here on purpose: a fresh install starts nothing and the Horon panel asks which runtime
+# to use. A machine that already has a clone at ~/horon keeps running it without being asked.
 - insert:
     - id: dsh-horon
       name: 'dsh-horon'
       config:
-        # No root / python here on purpose: a shipped bundle patch is applied on every machine
-        # that installs it, so it may only carry values that are true everywhere. Both default to
-        # ~/horon and <root>/.venv (or PATH `python`); set them in the profile patch if yours
-        # live elsewhere. spawn mode reads them, docker/url modes ignore them.
+        # No root / python here either: a shipped bundle patch is applied on every machine that
+        # installs it, so it may only carry values that are true everywhere.
         port: 8710
         autostart: true
         hooks: true

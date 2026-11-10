@@ -1,7 +1,6 @@
-# Horon 服务（手写版 compose）。构建上下文随插件发布，先组装再起容器（在本目录下运行）：
-#   node build.mjs [Horon 仓库路径]       # 默认 ~/horon，或设 HORON_REPO
-#   cp env.example "$HORON_DATA_DIR/.env" # 按需填 API key / 代理
-#   docker compose up -d --build
+# Horon 服务（手写版 compose）。镜像由 CI 按 horon.lock.json 的 commit 构建并推到 Docker Hub，
+# 本机只 pull，不 build：
+#   docker compose pull && docker compose up -d
 #
 # dsh 的「设置 → Horon 服务」页会按当前配置直接生成一份填好路径的 compose 和命令，
 # 平时用那一份即可；这份只是同一个容器的等价手写版，路径靠 HORON_DATA_DIR 传入。
@@ -18,13 +17,8 @@ name: horon
 
 services:
   horon:
-    build:
-      context: ./context
-      args:
-        BUILD_PROXY: ${BUILD_PROXY:-}
-        NPM_REGISTRY: ${NPM_REGISTRY:-}
-        PIP_INDEX: ${PIP_INDEX:-}
-    image: ${HORON_IMAGE:-horon-service:local}
+    # 与插件 horon.lock.json 的 image.name:tag 一致；换版本改这里或设 HORON_IMAGE。
+    image: ${HORON_IMAGE:-guicaiyue/horon-service:1.0.0}
     container_name: ${HORON_CONTAINER:-horon}
     restart: unless-stopped
     # 积压的补向量任务会以 detached 子进程跑（backend/integrity.py），需要 init 收尸。

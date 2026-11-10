@@ -2,6 +2,9 @@
 // commands and compose file the settings page offers for copying, and the one-click deploy that
 // runs those commands on this host.
 //
+// The image is pulled, never built here: CI builds it from the pinned Horon commit and publishes
+// it under the name in horon.lock.json.
+//
 // Every mount is a bind mount of a host directory, by default under the user's home directory
 // (os.homedir(): C:\Users\<name> on Windows, /home/<name> or /root on Linux), so the data stays on
 // the host across redeploys:
@@ -9,7 +12,6 @@
 //   dataDir/local    -> /app/.horon-local         backfill locks and logs
 //   tagPluginsDir    -> /app/backend/tag_plugins  tag plugins (the entrypoint seeds the system ones)
 //   envFile          -> --env-file                API keys / proxy; created from env.example
-// The image is built from docker/context/, which ships with the plugin (docker/build.mjs).
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -18,15 +20,21 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { readLock } from './artifact.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const DOCKER_DIR = path.join(HERE, 'docker')
-export const CONTEXT_DIR = path.join(DOCKER_DIR, 'context')
 const ENV_EXAMPLE = path.join(DOCKER_DIR, 'env.example')
 const CONTAINER_PORT = 8710
 const LOG_LIMIT = 256 * 1024
 const READY_TIMEOUT_MS = 120_000
 const STATUS_TIMEOUT_MS = 8000
+
+/** The published image this plugin version was built against. */
+export function defaultImage() {
+  const image = readLock()?.image
+  return image?.name && image?.tag ? `${image.name}:${image.tag}` : 'horon-service:local'
+}
 
 export function defaultDataDir() {
   return path.join(os.homedir(), '.horon', 'docker')
@@ -73,7 +81,7 @@ export function dockerSettings(config) {
     tagPluginsDir: file(c.tagPluginsDir) ?? path.join(dataDir, 'tag_plugins'),
     dockerBind,
     dockerPort,
-    image: text(c.image) ?? 'horon-service:local',
+    image: text(c.image) ?? defaultImage(),
     container: text(c.container) ?? 'horon',
     buildProxy: text(c.buildProxy) ?? '',
     timeZone: hostTimeZone(),
@@ -85,12 +93,8 @@ export function dockerSettings(config) {
 export function dockerPlan(d) {
   return {
     dirs: [...new Set([d.dataDir, d.dbDir, d.localDir, d.tagPluginsDir, path.dirname(d.envFile)])],
-    build: [
-      ['build', '--progress=plain'],
-      ['-t', d.image],
-      ...(d.buildProxy ? [['--build-arg', `BUILD_PROXY=${d.buildProxy}`]] : []),
-      [CONTEXT_DIR],
-    ],
+    // `--pull missing` keeps an already-downloaded image when the registry is unreachable.
+    pull: [['pull', d.image]],
     remove: [['rm', '-f', d.container]],
     run: [
       ['run', '-d'],
@@ -143,11 +147,11 @@ function renderCommands(d, platform) {
     lines.push(`mkdir -p ${plan.dirs.map(q).join(' ')}`)
     lines.push(`[ -e ${q(d.envFile)} ] || cp ${q(ENV_EXAMPLE)} ${q(d.envFile)}`)
   }
-  const [buildHead, ...buildRest] = plan.build
+  const [buildHead, ...buildRest] = plan.pull
   const [runHead, ...runRest] = plan.run
   lines.push(
     '',
-    '# 2. 构建镜像（构建上下文随插件发布）',
+    '# 2. 拉取镜像（CI 按锁定 commit 构建并发布，本机不构建）',
     command([['docker', ...buildHead], ...buildRest]),
     '',
     '# 3. 启动容器（同名容器会被替换；数据在上面的目录里，不受影响）',
@@ -170,15 +174,12 @@ function renderCompose(d) {
   ]
   return [
     '# 由 dsh-horon 设置页按当前配置生成。保存成 docker-compose.yml，在同一目录运行：',
-    '#   docker compose up -d --build',
+    '#   docker compose pull && docker compose up -d',
     '# 服务没有鉴权：端口默认只绑 127.0.0.1，改成 0.0.0.0 前确认网络可信。',
     'name: horon',
     '',
     'services:',
     '  horon:',
-    '    build:',
-    `      context: ${y(CONTEXT_DIR)}`,
-    ...(d.buildProxy ? ['      args:', `        BUILD_PROXY: ${y(d.buildProxy)}`] : []),
     `    image: ${y(d.image)}`,
     `    container_name: ${y(d.container)}`,
     '    restart: unless-stopped',
@@ -214,13 +215,19 @@ async function readText(...files) {
 }
 
 export async function renderTexts(d, platform = process.platform) {
+  const lock = readLock()
   return {
     commands: renderCommands(d, platform),
     compose: renderCompose(d),
-    dockerfile: await readText(path.join(CONTEXT_DIR, 'Dockerfile'), path.join(DOCKER_DIR, 'Dockerfile')),
+    dockerfile: await readText(path.join(DOCKER_DIR, 'Dockerfile')),
     envExample: await readText(ENV_EXAMPLE),
-    contextDir: CONTEXT_DIR,
-    contextReady: existsSync(path.join(CONTEXT_DIR, 'Dockerfile')),
+    // Nothing has to be generated locally before a deploy anymore; the page only needs the digest
+    // the release pinned, if any.
+    image: d.image,
+    digest: lock?.image?.digest ?? '',
+    horonCommit: lock?.horon?.commit ?? '',
+    // Deploy is always possible now (a pull needs no build context); the pull can still fail.
+    contextReady: true,
   }
 }
 
@@ -385,17 +392,13 @@ async function deploy(d, say) {
   }
 
   say(`# Horon deploy  ${new Date().toISOString()}\n`)
-  if (!existsSync(path.join(CONTEXT_DIR, 'Dockerfile'))) {
-    say(`\nThe build context ${CONTEXT_DIR} is missing; run \`node docker/build.mjs <Horon repository>\` in the plugin directory first.\n`)
-    return false
-  }
   if ((await step(['version', '--format', '{{.Server.Version}}'])).code !== 0) {
     say('\nDocker is not available: install Docker and make sure the engine is running.\n')
     return false
   }
 
-  // Something else on the port (typically the spawn-mode service) would make `docker run` fail
-  // after a long build; stop early instead. Our own running container is replaced below.
+  // Something else on the port (typically a spawn/artifact-mode service) would make `docker run`
+  // fail after a long pull; stop early instead. Our own running container is replaced below.
   const inspect = await runDocker(['inspect', '--type', 'container', '--format', '{{.State.Running}}', d.container])
   const oursRunning = inspect.code === 0 && inspect.out.trim() === 'true'
   if (!oursRunning && (await portInUse(urlHost(d.dockerBind), d.dockerPort))) {
@@ -416,7 +419,7 @@ async function deploy(d, say) {
     say(`created ${d.envFile} from env.example; put the API keys / proxy there\n`)
   }
 
-  if ((await step(flat(plan.build))).code !== 0) return false
+  if ((await step(flat(plan.pull))).code !== 0) return false
   await step(flat(plan.remove)) // "No such container" on the first deploy is fine
   if ((await step(flat(plan.run))).code !== 0) return false
 

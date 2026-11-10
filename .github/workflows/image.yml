@@ -1,0 +1,152 @@
+name: image
+
+# Build the Horon service image from the commit pinned in horon.lock.json and push it to Docker Hub.
+# Users never build: `mode: docker` only pulls. Tags:
+#   <image.tag>            what the plugin's lock file points at (e.g. 1.0.0)
+#   horon-<commit8>        the same image by source commit, for debugging an old release
+#
+# After a successful push the workflow writes the repository Docker Hub actually accepted back into
+# horon.lock.json. That is what keeps `image.name` correct without anyone typing a namespace by
+# hand. Pushes made with GITHUB_TOKEN do not start new workflow runs, so this cannot loop.
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - horon.lock.json
+      - docker/**
+      - scripts/**
+      - horon_web_app.py
+      - artifact.js
+      - .github/workflows/image.yml
+  workflow_dispatch:
+    inputs:
+      push:
+        description: push to Docker Hub (off = build only)
+        type: boolean
+        default: true
+
+env:
+  IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/horon-service
+
+jobs:
+  build:
+    # A lock-only commit from the bot must not trigger another full multi-arch build.
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message || '', 'chore(lock)')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - id: pin
+        run: |
+          echo "sha=$(jq -r .horon.commit horon.lock.json)" >> "$GITHUB_OUTPUT"
+          echo "repo=$(jq -r .horon.repo horon.lock.json)" >> "$GITHUB_OUTPUT"
+          echo "tag=$(jq -r .image.tag horon.lock.json)" >> "$GITHUB_OUTPUT"
+          echo "short=$(jq -r .horon.commit horon.lock.json | cut -c1-8)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'workflow_dispatch' || inputs.push
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'workflow_dispatch' || inputs.push }}
+          build-args: |
+            HORON_REPO=${{ steps.pin.outputs.repo }}
+            HORON_SHA=${{ steps.pin.outputs.sha }}
+            BUILD_PROXY=${{ vars.BUILD_PROXY || '' }}
+            NPM_REGISTRY=${{ vars.NPM_REGISTRY || '' }}
+            PIP_INDEX=${{ vars.PIP_INDEX || '' }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.pin.outputs.tag }}
+            ${{ env.IMAGE }}:horon-${{ steps.pin.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: record the image in the lock file
+        if: steps.build.outputs.digest != '' && (github.event_name != 'workflow_dispatch' || inputs.push)
+        run: |
+          node scripts/lock-sync.mjs image "$IMAGE"
+          if git diff --quiet -- horon.lock.json; then
+            echo "lock already names $IMAGE"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add horon.lock.json
+          git commit -m "chore(lock): record published image [skip ci]"
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash && git push && break
+            echo "push failed (attempt $attempt), retrying"
+            sleep 5
+          done
+      - name: summary
+        run: |
+          {
+            echo "### image"
+            echo
+            echo "- pushed: \`${{ env.IMAGE }}:${{ steps.pin.outputs.tag }}\`"
+            echo "- by commit: \`${{ env.IMAGE }}:horon-${{ steps.pin.outputs.short }}\`"
+            echo "- digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- horon: \`${{ steps.pin.outputs.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The contract the plugin depends on is two endpoints; a broken image must fail here, not on a
+  # user's machine after a 250 MB pull.
+  smoke:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message || '', 'chore(lock)')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: pin
+        run: |
+          echo "sha=$(jq -r .horon.commit horon.lock.json)" >> "$GITHUB_OUTPUT"
+          echo "repo=$(jq -r .horon.repo horon.lock.json)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          load: true
+          platforms: linux/amd64
+          build-args: |
+            HORON_REPO=${{ steps.pin.outputs.repo }}
+            HORON_SHA=${{ steps.pin.outputs.sha }}
+          tags: horon-service:smoke
+          cache-from: type=gha
+      - name: endpoints
+        run: |
+          docker run -d --name horon --init -e HORON_DB=/data/horon.db -v "$PWD/.smoke:/data" horon-service:smoke
+          for i in $(seq 1 60); do
+            if docker exec horon python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8710/api/sessions', timeout=2)" 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec horon python - <<'PY'
+          import json, urllib.request
+          sessions = urllib.request.urlopen('http://127.0.0.1:8710/api/sessions', timeout=30).status
+          cli = urllib.request.Request(
+              'http://127.0.0.1:8710/api/cli',
+              data=json.dumps({'args': ['list_tags']}).encode(),
+              headers={'content-type': 'application/json'},
+          )
+          body = json.load(urllib.request.urlopen(cli, timeout=120))
+          assert body['code'] == 0, body
+          hook = urllib.request.Request(
+              'http://127.0.0.1:8710/api/hook/Stop',
+              data=b'{}', headers={'content-type': 'application/json'},
+          )
+          print('sessions', sessions, 'cli ok, hook', urllib.request.urlopen(hook, timeout=120).status)
+          print('console bytes', len(urllib.request.urlopen('http://127.0.0.1:8710/', timeout=30).read()))
+          PY
+          docker logs --tail 40 horon
+          docker rm -f horon

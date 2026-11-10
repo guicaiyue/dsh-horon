@@ -1,0 +1,60 @@
+name: ci
+
+# Everything that can be checked without a registry: syntax of the published files, the host-half
+# smoke test, and consistency of horon.lock.json (the one input every deployable depends on).
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: syntax
+        run: |
+          for file in index.js harness.js client.js docker.js artifact.js scripts/assemble.mjs scripts/lock-sync.mjs scripts/market-entry.mjs; do
+            node --check "$file"
+          done
+          python3 -m py_compile scripts/bootstrap.py horon_web_app.py
+      - name: lock file
+        run: |
+          jq -e '.horon.commit | test("^[0-9a-f]{40}$")' horon.lock.json > /dev/null
+          jq -e '.image.name and .image.tag' horon.lock.json > /dev/null
+          jq -e '.artifact.baseUrl and .artifact.asset' horon.lock.json > /dev/null
+          jq -e '.platforms | length > 0' horon.lock.json > /dev/null
+          echo "pinned horon commit: $(jq -r .horon.commit horon.lock.json)"
+          echo "image:               $(jq -r '.image.name + ":" + .image.tag' horon.lock.json)"
+      - name: market entry
+        run: |
+          node scripts/market-entry.mjs --timestamp 1762732800
+          node -e "
+            const fs = require('fs')
+            const index = JSON.parse(fs.readFileSync('market/dsh-horon.json', 'utf8'))
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+            if (index.format !== 1) throw new Error('format must be 1')
+            if (!index.title?.en) throw new Error('index title needs en')
+            const entry = index.plugins?.[0]
+            if (!entry) throw new Error('no plugin entry')
+            if (entry.name !== pkg.name) throw new Error('name mismatch: ' + entry.name)
+            const version = entry.versions?.[0]
+            if (version?.version !== pkg.version) throw new Error('version mismatch: ' + version?.version)
+            if (version?.source?.type !== 'npm') throw new Error('source must be npm')
+            if (!entry.description?.en || !entry.description?.zh) throw new Error('description needs en and zh')
+            console.log('market entry ok:', entry.name + '@' + version.version)
+          "
+      - name: host-half smoke test
+        run: node test/host-smoke.mjs
+      - name: package contents
+        run: |
+          npm pack --dry-run 2>&1 | tail -20
+          # The build inputs must not ride along: they are generated per release, not published.
+          if npm pack --dry-run 2>&1 | grep -E 'docker/context|\.env$|\.db$'; then
+            echo "generated or secret files leaked into the package"; exit 1
+          fi

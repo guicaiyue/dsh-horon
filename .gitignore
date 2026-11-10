@@ -5,8 +5,12 @@ node_modules/
 __pycache__/
 *.py[cod]
 
-# generated docker build context (regenerate with `node docker/build.mjs <horon-repo>`)
-docker/context/
+# generated: the Horon manuals are copied from the pinned commit at publish time (scripts/assemble.mjs --skills)
+skills/
+
+# local build scratch (scripts/assemble.mjs --out .build/...)
+.build/
+out/
 
 # local runtime state: databases, secrets, mounts
 .env

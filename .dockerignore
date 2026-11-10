@@ -1,0 +1,17 @@
+# The image build context is the plugin root: the Dockerfile fetches Horon by SHA itself, so
+# nothing generated or local may be sent along.
+.git
+.github
+.build
+out
+node_modules
+skills
+.horon-local
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+.env
+.DS_Store
+test
+docs

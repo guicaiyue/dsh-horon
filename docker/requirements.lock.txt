@@ -1,5 +1,6 @@
-# Horon 服务镜像的锁定依赖。版本取自 Horon 仓库自己的 .venv（2026-11-03）。
-# Horon 仓库的 requirements.txt 只列包名不锁版本，这里锁住，保证 NAS 和本机装出来的是同一套。
+# Locked requirements of the Horon service image and the released build artifacts.
+# Versions taken from the Horon repository's own .venv (2026-11-03); Horon's requirements.txt
+# pins nothing, so they are pinned here to keep the image, the artifacts and a local run identical.
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1

@@ -1,0 +1,125 @@
+name: release
+
+# Build the per-platform deployables users download instead of cloning Horon:
+#   horon-app-<platform>-<commit8>.tar.gz   backend + built console + pinned wheels + bootstrap.py
+#
+# A user with Python 3.12 and no Docker, no git and no npm can run one of these. The plugin picks
+# the asset for its platform from horon.lock.json, so the digest list printed at the end must be
+# copied into that file (the `lock-digests` job writes it as an artifact and a job summary).
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - horon.lock.json
+      - scripts/**
+      - horon_web_app.py
+      - docker/requirements.lock.txt
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || !startsWith(github.event.head_commit.message || '', 'chore(lock)')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [win-x64, linux-x64, linux-arm64, macos-x64, macos-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - id: pin
+        run: |
+          echo "sha=$(jq -r .horon.commit horon.lock.json)" >> "$GITHUB_OUTPUT"
+          echo "repo=$(jq -r .horon.repo horon.lock.json | sed -E 's#^https://github.com/##; s#\.git$##')" >> "$GITHUB_OUTPUT"
+          echo "short=$(jq -r .horon.commit horon.lock.json | cut -c1-8)" >> "$GITHUB_OUTPUT"
+          echo "release=$(jq -r .artifact.release horon.lock.json)" >> "$GITHUB_OUTPUT"
+      # The pinned source commit, checked out next to the plugin; nothing is cloned inside a build.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: horon
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: assemble
+        run: |
+          node scripts/assemble.mjs \
+            --repo horon --out out \
+            --platform "${{ matrix.platform }}" \
+            --wheels --build-web
+      - name: pack
+        run: |
+          name="horon-app-${{ matrix.platform }}-${{ steps.pin.outputs.short }}.tar.gz"
+          tar -czf "$name" -C out .
+          sha256sum "$name" | tee "$name.sha256"
+          ls -lh "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horon-app-${{ matrix.platform }}
+          path: |
+            horon-app-*.tar.gz
+            horon-app-*.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - id: pin
+        run: |
+          echo "short=$(jq -r .horon.commit horon.lock.json | cut -c1-8)" >> "$GITHUB_OUTPUT"
+          echo "release=$(jq -r .artifact.release horon.lock.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: horon-${{ steps.pin.outputs.short }}
+          name: Horon ${{ steps.pin.outputs.short }} build artifacts
+          body: |
+            Build artifacts of Horon `${{ steps.pin.outputs.short }}` for the dsh-horon plugin.
+            The plugin unpacks the asset matching its platform; no repository, git or npm needed.
+
+            The `sha256` values are written into `horon.lock.json` by this workflow, so a download is
+            verified against the published digest without anyone copying numbers by hand.
+          files: |
+            assets/horon-app-*.tar.gz
+            assets/horon-app-*.sha256
+          fail_on_unmatched_files: true
+      # The digests the plugin verifies on download; recording them here means a rebuilt asset can
+      # never silently differ from what the lock promises.
+      - name: record digests in the lock file
+        run: |
+          node scripts/lock-sync.mjs digests assets/horon-app-*.tar.gz
+          if git diff --quiet -- horon.lock.json; then
+            echo "digests already recorded"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add horon.lock.json
+          git commit -m "chore(lock): record artifact digests [skip ci]"
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash && git push && break
+            echo "push failed (attempt $attempt), retrying"
+            sleep 5
+          done
+      - name: summary
+        run: |
+          {
+            echo "### artifacts"
+            echo
+            echo '```json'
+            jq '.artifact.sha256' horon.lock.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
