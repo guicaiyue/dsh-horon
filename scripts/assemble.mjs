@@ -52,12 +52,23 @@ const SKIP_SUFFIXES = ['.pyc', '.pyo', '.db', '.db-wal', '.db-shm', '.db-journal
 const PYTHON_VERSION = '3.12'
 
 // `pip download --platform` names, so one Linux runner can fetch every target's wheels.
+//
+// Every tag the platform accepts has to be listed: once --platform is given, pip uses exactly
+// those tags and no compatibility list, so a short list rejects wheels that would install fine
+// (numpy ships manylinux_2_28, pydantic_core manylinux_2_17). The newest tag also decides the
+// floor: a Linux artifact needs glibc >= 2.28, which Python 3.12 already implies.
 const PIP_PLATFORMS = {
   'win-x64': ['win_amd64'],
-  'linux-x64': ['manylinux2014_x86_64', 'manylinux_2_17_x86_64'],
-  'linux-arm64': ['manylinux2014_aarch64', 'manylinux_2_17_aarch64'],
-  'macos-x64': ['macosx_10_13_x86_64'],
-  'macos-arm64': ['macosx_11_0_arm64'],
+  'linux-x64': [
+    'manylinux_2_28_x86_64', 'manylinux_2_27_x86_64', 'manylinux_2_24_x86_64',
+    'manylinux_2_17_x86_64', 'manylinux2014_x86_64', 'manylinux_2_5_x86_64',
+  ],
+  'linux-arm64': [
+    'manylinux_2_28_aarch64', 'manylinux_2_27_aarch64', 'manylinux_2_24_aarch64',
+    'manylinux_2_17_aarch64', 'manylinux2014_aarch64',
+  ],
+  'macos-x64': ['macosx_10_13_x86_64', 'macosx_10_15_x86_64', 'macosx_11_0_x86_64', 'macosx_12_0_x86_64'],
+  'macos-arm64': ['macosx_11_0_arm64', 'macosx_12_0_arm64', 'macosx_13_0_arm64', 'macosx_14_0_arm64'],
 }
 
 function fail(message) {

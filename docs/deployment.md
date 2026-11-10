@@ -59,6 +59,12 @@ horon-app-<platform>-<commit8>.tar.gz
 `bootstrap.py` 是幂等的：第二次启动只看 `.ready.json` 的指纹就跳过。没有 `venv` 模块的机器
 （某些精简 Debian）会退到 `app/vendor`，插件把该目录放进 `PYTHONPATH`。
 
+平台要求：`wheels/` 按平台预下（Windows x64、Linux x64/arm64、macOS x64/arm64）。Linux 包里的
+numpy 只提供 `manylinux_2_28` 轮子，所以 Linux 构建物要求 **glibc ≥ 2.28**（Debian 10+ /
+Ubuntu 20.04+ / 主流发行版）；Python 3.12 本身已经隐含这个下限。`pip download` 一旦指定
+`--platform` 就不再走兼容列表，因此每个平台都得把可接受的标签列全，否则会出现「某个包突然
+找不到匹配版本」。
+
 ## 插件侧执行顺序
 
 1. 挂载时若 `mode` 为空且本机没有 `~/horon` 克隆 → **不启动任何东西**，面板显示「先选一种运行方式」。
