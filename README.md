@@ -153,8 +153,8 @@ node test/host-smoke.mjs && node test/artifact-smoke.mjs      # 只跑纯函数�
 | `hooks` | `true` | `false` 只留 `horon` 工具，不挂钩子（也可用环境变量 `HORON_HOOKS=off`） |
 | `skills` | `spawn` / `artifact` 模式外默认开 | 是否注册三个 horon skill |
 | `dataDir` | `~/.horon/docker` | `artifact` 与 `docker` 共用的宿主数据目录（库、`.env`、tag 插件） |
-| `dbFile` | `<dataDir>/data/horon.db` | SQLite 库；`docker` 模式下所在目录挂到容器 `/data` |
-| `envFile` | `<dataDir>/.env` | API key / 代理；`docker` 模式缺失时从 `docker/env.example` 复制，`artifact` 模式作为 `app/.env` 的种子 |
+| `dbFile` | `<dataDir>/data/horon.db` | SQLite 库；`docker` 模式挂到容器 `/data`，`artifact` 模式写进 `app/.env` 的 `HORON_DB`。从 docker 切过来时**显式写这一行**，否则会指向另一个库 |
+| `envFile` | `<dataDir>/.env` | API key / 代理；`docker` 模式缺失时从 `docker/env.example` 复制，`artifact` 模式作为 `app/.env` 的种子（`HORON_DB` 由 `dbFile` 覆盖） |
 | `tagPluginsDir` | `<dataDir>/tag_plugins` | tag 插件目录（`docker` 模式挂到 `/app/backend/tag_plugins`） |
 | `dockerBind` / `dockerPort` | `127.0.0.1` / `8710` | 容器发布地址 |
 | `image` / `container` | `<horon.lock.json image>` / `horon` | 镜像与容器名 |

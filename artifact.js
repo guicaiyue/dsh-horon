@@ -89,6 +89,14 @@ export function artifactSettings(config) {
     basePython: text(c.python) ?? (process.platform === 'win32' ? 'python' : 'python3'),
     // Shared with docker mode on purpose: switching modes keeps the database, .env and tag plugins.
     dataDir: path.resolve(expandHome(text(c.dataDir) ?? path.join(os.homedir(), '.horon', 'docker'))),
+    // An explicit dbFile / envFile wins, so a user who ran docker mode keeps the very same memory
+    // file and API keys after switching. "My notes are gone" must not be the first report.
+    dbFile: text(c.dbFile)
+      ? path.resolve(expandHome(text(c.dbFile)))
+      : path.join(path.resolve(expandHome(text(c.dataDir) ?? path.join(os.homedir(), '.horon', 'docker'))), 'data', 'horon.db'),
+    envFile: text(c.envFile)
+      ? path.resolve(expandHome(text(c.envFile)))
+      : path.join(path.resolve(expandHome(text(c.dataDir) ?? path.join(os.homedir(), '.horon', 'docker'))), '.env'),
     lock,
   }
 }
@@ -221,19 +229,20 @@ async function extract(archive, destination, log) {
 }
 
 // The service reads ROOT/.env and needs HORON_DB there. The file lives inside the version
-// directory, but every path in it points at the shared dataDir, so it survives an upgrade.
+// directory, but every path in it points outside, at the shared database and key file, so it
+// survives an upgrade. It is rewritten on every start of this code path, so editing dbFile or
+// envFile in the profile takes effect instead of being silently ignored.
 async function writeEnv(a, log) {
   const file = path.join(a.appDir, '.env')
-  if (existsSync(file)) return
-  const shared = path.join(a.dataDir, '.env')
   let body = ''
-  if (existsSync(shared)) {
-    body = await fs.readFile(shared, 'utf8')
-    log(`seeded app/.env from ${shared}`)
+  if (existsSync(a.envFile)) {
+    body = await fs.readFile(a.envFile, 'utf8')
+    log(`seeded app/.env from ${a.envFile}`)
   }
-  const dbFile = path.join(a.dataDir, 'data', 'horon.db')
-  if (!/^\s*HORON_DB\s*=/m.test(body)) body = `${body}${body && !body.endsWith('\n') ? '\n' : ''}HORON_DB=${dbFile}\n`
-  await fs.writeFile(file, body, 'utf8')
+  const lines = body.split(/\r?\n/).filter((line) => !/^\s*HORON_DB\s*=/.test(line))
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
+  lines.push(`HORON_DB=${a.dbFile}`)
+  await fs.writeFile(file, `${lines.join('\n')}\n`, 'utf8')
 }
 
 /**
@@ -248,6 +257,8 @@ export async function provisionArtifact(a, log = () => {}) {
   const python = venvPython(a.appDir)
   if (existsSync(marker) && existsSync(python)) {
     log(`artifact already installed at ${a.root}`)
+    // Still reconcile app/.env: the config may name a different database since the last start.
+    await writeEnv(a, log)
     return { root: a.appDir, python }
   }
 

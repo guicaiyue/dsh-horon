@@ -442,6 +442,8 @@ function describeArtifact(a) {
     url: a.url,
     sha256: a.sha256 || undefined,
     dataDir: a.dataDir,
+    dbFile: a.dbFile,
+    envFile: a.envFile,
     pinned: a.lock?.horon?.commit,
     image: a.lock?.image ? `${a.lock.image.name}:${a.lock.image.tag}` : undefined,
   }
