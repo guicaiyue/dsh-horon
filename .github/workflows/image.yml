@@ -25,9 +25,6 @@ on:
         type: boolean
         default: true
 
-env:
-  IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/horon-service
-
 jobs:
   build:
     # A lock-only commit from the bot must not trigger another full multi-arch build.
@@ -35,6 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # A job-level env is the only place a secret may name the repository.
+    env:
+      IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/horon-service
     steps:
       - uses: actions/checkout@v4
       - id: pin
