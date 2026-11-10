@@ -6,9 +6,11 @@
 //   (cd .build && tar -czf horon-app-<platform>-<commit8>.tar.gz -C a2 .)
 //   (cd .build && python -m http.server 8799 &)
 //   node test/artifact-smoke.mjs .build/horon-app-<platform>-<commit8>.tar.gz http://127.0.0.1:8799
+//   node test/artifact-smoke.mjs --remote      # the real thing: download the released asset
 //
 // The argument is optional: with no archive it only checks the pure functions (platform key,
-// settings) so the test stays useful in CI where nothing was assembled.
+// settings) so the test stays useful in CI where nothing was assembled. `--remote` downloads the
+// asset the lock file points at, verifies the digest recorded there and runs it.
 
 import assert from 'node:assert'
 import { createHash } from 'node:crypto'
@@ -18,7 +20,8 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { artifactSettings, artifactStatus, platformKey, provisionArtifact } from '../artifact.js'
 
-const archive = process.argv[2]
+const remote = process.argv.includes('--remote')
+const archive = remote ? undefined : process.argv[2]
 const baseUrl = process.argv[3] ?? 'http://127.0.0.1:8799'
 
 // ---- pure functions ----------------------------------------------------------------------------
@@ -37,25 +40,33 @@ assert.equal(pinned.commit8, 'a'.repeat(8))
 assert.ok(pinned.url.includes('a'.repeat(8)), pinned.url)
 console.log('settings ok:', pinned.url)
 
-if (archive === undefined) {
+if (archive === undefined && !remote) {
   console.log('no archive given: settings only')
   process.exit(0)
 }
 
 // ---- provisioning over HTTP --------------------------------------------------------------------
-const file = path.resolve(archive)
-assert.ok(existsSync(file), `${file} does not exist`)
-const name = path.basename(file)
-const sha256 = createHash('sha256').update(readFileSync(file)).digest('hex')
 const scratch = path.resolve('.build/smoke')
 await fs.rm(scratch, { recursive: true, force: true })
 
-const settings = artifactSettings({
-  artifactUrl: `${baseUrl}/${name}`,
-  artifactSha256: sha256,
-  artifactDir: path.join(scratch, 'runtime'),
-  dataDir: path.join(scratch, 'data'),
-})
+let settings
+if (remote) {
+  // No overrides: exactly what a user's plugin does with the published lock file.
+  settings = artifactSettings({ artifactDir: path.join(scratch, 'runtime'), dataDir: path.join(scratch, 'data') })
+  console.log('remote asset:', settings.url)
+  assert.ok(settings.sha256, 'the lock file has no digest for this platform; run scripts/lock-sync.mjs digests')
+} else {
+  const file = path.resolve(archive)
+  assert.ok(existsSync(file), `${file} does not exist`)
+  const name = path.basename(file)
+  const sha256 = createHash('sha256').update(readFileSync(file)).digest('hex')
+  settings = artifactSettings({
+    artifactUrl: `${baseUrl}/${name}`,
+    artifactSha256: sha256,
+    artifactDir: path.join(scratch, 'runtime'),
+    dataDir: path.join(scratch, 'data'),
+  })
+}
 
 const lines = []
 const started = Date.now()
