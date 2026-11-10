@@ -14,7 +14,7 @@
     "commit": "1c62240bbf6cd9de95f2664a460797d46f2f71ce"
   },
   "image": {
-    "name": "guicaiyue/horon-service",
+    "name": "xirizhi/horon-service",
     "tag": "1.0.0",
     "digest": ""
   },
@@ -24,5 +24,11 @@
     "asset": "horon-app-{platform}-{commit8}.tar.gz",
     "sha256": {}
   },
-  "platforms": ["win-x64", "linux-x64", "linux-arm64", "macos-x64", "macos-arm64"]
+  "platforms": [
+    "win-x64",
+    "linux-x64",
+    "linux-arm64",
+    "macos-x64",
+    "macos-arm64"
+  ]
 }
