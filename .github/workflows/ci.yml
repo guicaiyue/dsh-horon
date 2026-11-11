@@ -53,7 +53,12 @@ jobs:
         run: node test/host-smoke.mjs
       - name: package contents
         run: |
-          npm pack --dry-run 2>&1 | tail -20
+          npm pack --dry-run 2>&1 | tail -25
+          # Every runtime file the host half imports must be in the published tarball; a missing
+          # entry here is an install that cannot load.
+          for file in index.js harness.js client.js docker.js artifact.js paths.js horon_web_app.py horon.lock.json cordis.patch.yml scripts/bootstrap.py; do
+            grep -q " $file" <<< "$(npm pack --dry-run 2>&1)" || { echo "missing from the package: $file"; exit 1; }
+          done
           # The build inputs must not ride along: they are generated per release, not published.
           if npm pack --dry-run 2>&1 | grep -E 'docker/context|\.env$|\.db$'; then
             echo "generated or secret files leaked into the package"; exit 1

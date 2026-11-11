@@ -60,14 +60,9 @@ import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { artifactSettings, artifactStatus, provisionArtifact } from './artifact.js'
+import { defaultDataDir, proxyOf } from './paths.js'
 import {
-  artifactSettings,
-  artifactStatus,
-  defaultArtifactDir,
-  provisionArtifact,
-} from './artifact.js'
-import {
-  defaultDataDir,
   deployState,
   dockerSettings,
   dockerStatus,
@@ -98,12 +93,10 @@ const ROUTE = '/dsh-horon'
 const API_PREFIX = `${ROUTE}/_dsh/`
 // The settings call carries one small config object; anything bigger is not a config edit.
 const MAX_BODY_BYTES = 512 * 1024
-// Keys the settings page may write into the profile patch.
-const EDITABLE = new Set([
-  'mode', 'url', 'autostart', 'dataDir', 'dbFile', 'envFile', 'tagPluginsDir',
-  'dockerBind', 'dockerPort', 'image', 'container',
-  'artifactDir', 'artifactUrl', 'artifactBaseUrl', 'artifactSha256', 'horonCommit', 'python', 'root',
-])
+// Keys the settings page may write into the profile patch. Everything else is derived: the
+// database, the key file, the runtime directory and the container all follow `dataDir`, and the
+// container itself is fixed (loopback, 8710, the published image).
+const EDITABLE = new Set(['mode', 'proxy', 'dataDir', 'autostart', 'hooks', 'skills', 'url', 'port', 'python', 'root'])
 const MODES = new Set(['spawn', 'artifact', 'docker', 'url'])
 // BUNDLED_SKILL_RANK of @deepseek-ai/dsh-skill: user (~/.dsh/skills) and project skills win over it.
 const SKILL_RANK = 600
@@ -331,16 +324,29 @@ function cleanInput(input) {
       out.autostart = value !== false && value !== 'false' && value !== null
       continue
     }
+    if (key === 'skills') {
+      out.skills = value !== false && value !== 'false' && value !== null
+      continue
+    }
+    if (key === 'hooks') {
+      out.hooks = value !== false && value !== 'false' && value !== null
+      continue
+    }
+    // An empty proxy is a choice ("connect directly"), not a reset, so it is stored as "".
+    if (key === 'proxy') {
+      out.proxy = String(value ?? '').trim()
+      continue
+    }
     // An emptied field clears the override instead of writing an empty string; preview and
     // deploy read it as "use the default".
     if (value === null || String(value).trim() === '') {
       out[key] = null
       continue
     }
-    if (key === 'dockerPort') {
+    if (key === 'port') {
       const port = Number(value)
-      if (!Number.isInteger(port) || port < 1 || port > 65535) throw httpError(400, 'dockerPort must be a port number')
-      out.dockerPort = port
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw httpError(400, 'port must be a port number')
+      out.port = port
       continue
     }
     if (key === 'mode' && !MODES.has(value)) throw httpError(400, 'mode must be spawn, artifact, docker or url')
@@ -400,35 +406,20 @@ function readableConfig(config) {
     url: c.url,
     autostart: c.autostart !== false,
     dataDir: c.dataDir,
-    dbFile: c.dbFile,
-    envFile: c.envFile,
-    tagPluginsDir: c.tagPluginsDir,
-    dockerBind: c.dockerBind,
-    dockerPort: c.dockerPort,
-    image: c.image,
-    container: c.container,
-    artifactDir: c.artifactDir,
-    artifactUrl: c.artifactUrl,
-    artifactBaseUrl: c.artifactBaseUrl,
-    artifactSha256: c.artifactSha256,
-    horonCommit: c.horonCommit,
-    python: c.python,
-    root: c.root,
+    proxy: c.proxy,
   }
 }
 
 function describeResolved(d) {
   return {
     dataDir: d.dataDir,
-    dbDir: d.dbDir,
     dbFile: d.dbFile,
-    localDir: d.localDir,
     envFile: d.envFile,
     tagPluginsDir: d.tagPluginsDir,
-    dockerBind: d.dockerBind,
-    dockerPort: d.dockerPort,
+    localDir: d.localDir,
     image: d.image,
     container: d.container,
+    proxy: d.proxy,
     base: d.base,
   }
 }
@@ -470,7 +461,7 @@ async function describeConfig(ctx, config) {
     platform: process.platform,
     home: os.homedir(),
     defaultDataDir: defaultDataDir(),
-    defaultArtifactDir: defaultArtifactDir(),
+    defaultProxy: proxyOf({}),
     resolved: describeResolved(s.docker),
     artifact: describeArtifact(s.artifact),
     artifactState: await artifactStatus(s.artifact),

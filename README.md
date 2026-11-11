@@ -13,22 +13,20 @@
 3. **控制台**（`index.js` + `client.js`）—— dsh web 服务器上的 `/dsh-horon/` 反向代理，把 Horon 控制台塞进侧栏 iframe；它和 dsh 自己的路由走同一道 Host/Origin + 登录栅栏，所以跨机器打开 dsh 也能用。`/dsh-horon/_dsh/*` 是设置页用的状态、配置、预览、部署、日志接口。
 4. **skills 注册**（可选）—— 宿主读不到 Horon 仓库时（`artifact` / `docker` / `url` 模式），从本包的 `skills/` 注册 `horon-cli` / `horon-circuit` / `horon-plugin`；`artifact` 模式解包后也有 `app/.agents/skills`，两处内容同源（都来自锁定的 commit）。
 
-## 四种服务运行方式
+## 两种运行方式
 
-`config.mode` 决定 Horon 服务从哪来（不写 `mode` 时：有 `url` 就是 `url`，否则 `spawn`）：
+面板上只有两个选择（`config.mode`）：
 
-| mode | 做法 | 关键配置 |
-| --- | --- | --- |
-| `artifact` | **推荐**。按 `horon.lock.json` 下载 CI 发布的构建物（后端 + 打包好的控制台 + 依赖轮子），校验 sha256、解包、离线装运行时，再当本机进程跑。不需要 Horon 仓库，也不需要 git / npm / Docker，只要 Python 3.12 | `artifactDir`、`artifactUrl`、`dataDir` |
-| `docker` | **推荐**。服务是本机上的容器，镜像由 CI 按同一个 commit 构建并推到 Docker Hub；插件只 `docker pull`，不构建 | `dataDir`、`dbFile`、`envFile`、`tagPluginsDir`、`dockerBind`、`dockerPort`、`image`、`container` |
-| `spawn` | 开发用。插件自己拉起本机克隆里的 `python -m uvicorn horon_web_app:app` | `root`、`python`、`host`、`port` |
-| `url` | 服务跑在别处，插件只记地址，不启动也不部署 | `url` |
+| mode | 做法 |
+| --- | --- |
+| `artifact` | **默认**。从 GitHub Release 下载 CI 发布的构建物（后端 + 打包好的控制台 + 依赖轮子），走 `proxy`，校验 sha256，解包到 `<dataDir>/runtime/` 并离线装好运行时，然后当本机进程跑。只要 Python 3.12，不需要 Docker / git / npm / Horon 仓库 |
+| `docker` | 拉 CI 发布的镜像并作为本机容器运行（`127.0.0.1:8710`，容器名 `horon`，镜像固定取自 `horon.lock.json`），`<dataDir>` 挂到 `/data`。本机不构建 |
 
-`artifact` 与 `docker` 共用 `dataDir`（默认 `~/.horon/docker`）：数据库、`.env`、tag 插件都在那里，所以换方式、换版本都不丢记忆；构建物按 `<commit8>-<platform>` 解包，回滚就是把锁文件的 commit 改回去。
+两者共用同一个数据目录，所以随时切换都不丢记忆；容器地址、镜像名、容器名都不需要用户填。
 
-服务本身没有鉴权，默认只绑回环地址；要跨机器用请自行加一层可信网络。
+`spawn`（跑本机克隆）与 `url`（接已有远端服务）仍在代码里，供开发使用，不在面板上出现。
 
-**首次安装没有 `mode`**：插件不启动任何东西，Horon 面板会先问「下载构建物 / 拉取 Docker 镜像」。
+**首次安装没有 `mode`**：插件不启动任何东西，Horon 面板会先问「构建物 / Docker」。
 本机已有 `~/horon` 克隆的机器视为已选择 `spawn`，升级不会被重新询问。
 
 ## 安装
@@ -141,23 +139,23 @@ node test/host-smoke.mjs && node test/artifact-smoke.mjs      # 只跑纯函数�
 
 | key | 默认 | 说明 |
 | --- | --- | --- |
-| `mode` | 由 `url` 推断，否则 `spawn`（首次安装面板会问） | `artifact` / `docker` / `spawn` / `url` |
-| `url` | — | 运行中的 Horon 服务地址，例如 `http://127.0.0.1:8710` |
-| `artifactDir` | `~/.horon/runtime` | 构建物解包目录，每个版本一个 `<commit8>-<platform>` 子目录 |
-| `artifactUrl` / `artifactBaseUrl` / `artifactSha256` | 取自 `horon.lock.json` | 换镜像站或本地路径时用；后两者一般不用写 |
-| `horonCommit` | `horon.lock.json` 的 commit | 临时钉到别的上游 commit（高级） |
-| `root` | `~/horon` | `spawn` 模式的 Horon 仓库根目录 |
-| `python` | `<root>/.venv/...`，没有 venv 时 `python` | 解释器；`artifact` 模式下是 bootstrap 的基础解释器 |
-| `host` / `port` | `127.0.0.1` / `8710` | `artifact` / `spawn` 模式的绑定地址 |
+| `mode` | 首次安装面板会问 | **面板只给两种**：`artifact`（构建物，免 Docker）、`docker`（拉镜像）。`spawn` / `url` 仍在代码里，供开发和接已有远端服务，不在面板上 |
+| `dataDir` | `~/.horon` | **唯一的路径设置**。数据库、`.env`、构建物、tag 插件全部由它派生；两种运行方式共用 |
+| `proxy` | `https://gh-proxy.com` | 下载代理：构建物从 GitHub Release 取；docker 模式下同时写进 `~/.docker/config.json` 的 `proxies`。留空表示直连 |
 | `autostart` | `true` | `false` 只挂插件，不拉起服务/容器 |
 | `hooks` | `true` | `false` 只留 `horon` 工具，不挂钩子（也可用环境变量 `HORON_HOOKS=off`） |
-| `skills` | `spawn` / `artifact` 模式外默认开 | 是否注册三个 horon skill |
-| `dataDir` | `~/.horon/docker` | `artifact` 与 `docker` 共用的宿主数据目录（库、`.env`、tag 插件） |
-| `dbFile` | `<dataDir>/data/horon.db` | SQLite 库；`docker` 模式挂到容器 `/data`，`artifact` 模式写进 `app/.env` 的 `HORON_DB`。从 docker 切过来时**显式写这一行**，否则会指向另一个库 |
-| `envFile` | `<dataDir>/.env` | API key / 代理；`docker` 模式缺失时从 `docker/env.example` 复制，`artifact` 模式作为 `app/.env` 的种子（`HORON_DB` 由 `dbFile` 覆盖） |
-| `tagPluginsDir` | `<dataDir>/tag_plugins` | tag 插件目录（`docker` 模式挂到 `/app/backend/tag_plugins`） |
-| `dockerBind` / `dockerPort` | `127.0.0.1` / `8710` | 容器发布地址 |
-| `image` / `container` | `<horon.lock.json image>` / `horon` | 镜像与容器名 |
+| `skills` | `spawn` 模式外默认开 | 是否注册三个 horon skill |
+
+由 `dataDir` 派生、**不需要手写**：
+
+| 路径 | 用途 |
+| --- | --- |
+| `<dataDir>/horon.db` | SQLite 库；docker 模式下整个 `<dataDir>` 挂到容器 `/data`，所以两边是同一个文件 |
+| `<dataDir>/.env` | API key / 代理。旧布局的 `<dataDir>/docker/.env` 在没有新文件时仍会被读取 |
+| `<dataDir>/runtime/<commit8>-<platform>/` | 构建物解包目录，换版本解包到新目录，旧的可回滚 |
+| `<dataDir>/tag_plugins/` | 个人 tag 插件；artifact 模式每次启动镜像进构建物的 `app/backend/tag_plugins`，docker 模式直接挂载 |
+
+开发/接入已有服务时才用：`root`（`~/horon`）、`python`、`url`、`host` / `port`（`127.0.0.1:8710`）。
 
 ## License
 

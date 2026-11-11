@@ -41,63 +41,33 @@ window.__ModuleLoader__.load({
       sectionTitle: 'Horon 服务',
       loading: '正在读取配置…',
       mode: '运行方式',
-      modeSpawn: '本机进程（python -m uvicorn）',
       modeArtifact: '构建物（免 Docker）',
       modeDocker: 'Docker 容器（本机）',
-      modeUrl: '远端服务（只填 URL）',
-      modeHintSpawn: '由 dsh 自己拉起 Horon（需要本机 Python 环境和 Horon 仓库），开发时用。',
-      modeHintArtifact: '下载 CI 发布的构建物（后端 + 打包好的控制台 + 依赖轮子），解包到本机直接跑：不需要 Horon 仓库，也不需要 git / npm / Docker。',
-      modeHintDocker: 'Horon 跑在本机 Docker 容器里，数据全部挂载到下面这些宿主机目录。',
-      modeHintUrl: 'Horon 跑在别处，这里只记住地址；不启动也不部署。',
-      artifact: '构建物',
-      artifactHint: '按 horon.lock.json 锁定的 commit 和当前平台下载；换版本解包到新目录，旧版本留着可回滚。',
-      artifactDir: '构建物目录',
-      artifactDirHint: '默认：{def}',
-      artifactUrl: '构建物地址（可选）',
-      artifactUrlHint: '留空用 horon.lock.json 里的发布地址；也可以填镜像站或本地路径。',
-      artifactState: '构建物状态',
-      artifactMissing: '未下载',
-      artifactReady: '已就绪',
-      artifactPending: '已解包，运行时未装好',
-      artifactPin: '锁定',
+      modeHintArtifact: '从 GitHub Release 下载 CI 发布的构建物，解包到数据目录里直接跑：不需要 Horon 仓库，也不需要 git / npm / Docker。',
+      modeHintDocker: '拉取 CI 发布的镜像并作为本机容器运行，数据挂载到同一个数据目录。',
+      artifactReadyHint: '已就绪：构建物 {commit} · {platform}，位于数据目录的 runtime 下。',
+      artifactMissingHint: '还没下载：点「下载并安装」后会按锁定 commit 下载、校验摘要、离线装依赖。',
       provision: '下载并安装',
       provisioning: '下载安装中…',
-      provisionNote: '按锁定 commit 下载、校验 sha256、解包，再用自带的轮子离线装依赖。',
       provisionDone: '构建物已就绪，服务正在启动。',
       provisionFailed: '下载或安装失败，原因见日志。',
-      dataDirShared: '数据目录与 Docker 模式共用：数据库、.env、tag 插件都在这里，切换运行方式不会丢记忆。',
-      url: '服务地址',
-      urlHint: '例如 http://127.0.0.1:8710。服务本身没有鉴权，只应放在可信网络里。',
       autostart: '启动 dsh 时自动拉起',
       autostartHint: 'Docker 模式下只会 docker start 已存在的容器，不会替你创建。',
 
-      paths: '数据与挂载（全部在宿主机上）',
-      pathsHint: '留空即用默认值；路径可以写 ~，表示当前用户目录。数据库、.env、tag_plugins 都挂在宿主机上，重建容器不会丢。',
+      paths: '数据与下载',
+      pathsHint: '所有数据（数据库、.env、构建物、tag 插件）都在这一个目录下，两种运行方式共用，不会因为换方式丢记忆。留空用默认值，可以写 ~。',
       dataDir: '数据目录',
       dataDirHint: '默认：{def}',
-      dbFile: '数据库文件',
-      dbFileHint: '默认：{def}；所在目录挂到容器的 /data',
-      envFile: '环境变量文件',
-      envFileHint: '默认：{def}；API key 和代理写在这里，部署时若不存在会从 env.example 复制',
-      tagPluginsDir: 'tag 插件目录',
-      tagPluginsDirHint: '默认：{def}；挂到 /app/backend/tag_plugins',
-      dockerBind: '监听地址',
-      dockerPort: '端口',
-      bindHint: '默认 127.0.0.1',
-      portHint: '默认 8710',
-      image: '镜像',
-      container: '容器名',
+      proxy: '下载代理',
+      proxyHint: '默认 https://gh-proxy.com，用于从 GitHub Release 下载构建物；Docker 模式下拉镜像也会写进 ~/.docker/config.json。留空表示直连。',
 
       applied: '实际生效',
-      home: '用户目录',
-      platform: '当前平台',
-      bindWarning: '端口没有绑在回环地址上：Horon 服务没有鉴权，任何能访问这个端口的人都能读写你的记忆库。',
 
       save: '保存',
       saving: '保存中…',
       reset: '还原',
-      saveNote: '保存会改写 profile 的 cordis.patch.yml 并立即重载插件：本机进程模式的服务会被重启，端口改了还要刷新页面。',
-      saved: '已保存，插件正在重载；端口有变化时请刷新页面。',
+      saveNote: '保存会改写 profile 的 cordis.patch.yml 并立即重载插件：服务会按新的方式和目录重启。',
+      saved: '已保存，插件正在重载。',
       editBlocked: '这个 dsh 没有提供配置编辑器，只能手工改 profile 的 cordis.patch.yml。',
 
       deploy: '一键部署',
@@ -111,9 +81,7 @@ window.__ModuleLoader__.load({
       copyFailed: '浏览器不允许自动复制，请在下面手动选中。',
       tabCommands: '命令',
       tabCompose: 'compose',
-      tabDockerfile: 'Dockerfile',
       tabEnv: '.env 示例',
-      noContext: '镜像还没拉下来：点「一键部署」拉取即可。',
 
       onboardingTitle: '先选一种运行方式',
       onboardingNote: 'Horon 服务需要一个运行时。选一种装好就能用；之后可在「设置 → Horon 服务」里随时改。',
@@ -148,57 +116,27 @@ window.__ModuleLoader__.load({
       sectionTitle: 'Horon service',
       loading: 'Loading the settings…',
       mode: 'Mode',
-      modeSpawn: 'Local process (python -m uvicorn)',
       modeArtifact: 'Build artifact (no Docker)',
       modeDocker: 'Docker container (this host)',
-      modeUrl: 'Remote service (URL only)',
-      modeHintSpawn: 'dsh starts Horon itself from a local clone; the developer path.',
-      modeHintArtifact: 'Downloads the artifact CI released (backend + built console + pinned wheels) and runs it here: no Horon repository, no git, no npm, no Docker.',
-      modeHintDocker: 'Horon runs in a container on this host; everything below is bind-mounted from the host.',
-      modeHintUrl: 'Horon runs elsewhere; only the address is remembered. Nothing is started or deployed.',
-      artifact: 'Build artifact',
-      artifactHint: 'Downloaded for the commit pinned in horon.lock.json and this platform; a new version unpacks next to the old one, so rolling back is a config change.',
-      artifactDir: 'Artifact directory',
-      artifactDirHint: 'Default: {def}',
-      artifactUrl: 'Artifact URL (optional)',
-      artifactUrlHint: 'Empty uses the release URL in horon.lock.json; a mirror or a local path works too.',
-      artifactState: 'Artifact state',
-      artifactMissing: 'not downloaded',
-      artifactReady: 'ready',
-      artifactPending: 'unpacked, runtime not installed',
-      artifactPin: 'pinned',
+      modeHintArtifact: 'Downloads the artifact CI released from GitHub, unpacks it under the data directory and runs it: no Horon repository, no git, no npm, no Docker.',
+      modeHintDocker: 'Pulls the image CI released and runs it as a local container, with the same data directory mounted in.',
+      artifactReadyHint: 'Ready: artifact {commit} · {platform}, under the data directory runtime folder.',
+      artifactMissingHint: 'Not downloaded yet: Download and install fetches the pinned commit, verifies the digest and installs the runtime offline.',
       provision: 'Download and install',
       provisioning: 'Downloading…',
-      provisionNote: 'Downloads the pinned commit, verifies sha256, unpacks it and installs the runtime from the bundled wheels, offline.',
       provisionDone: 'The artifact is ready; the service is starting.',
       provisionFailed: 'The download or install failed; see the log.',
-      dataDirShared: 'The data directory is shared with Docker mode: database, .env and tag plugins stay put when you switch.',
-      url: 'Service URL',
-      urlHint: 'For example http://127.0.0.1:8710. The service has no auth of its own, so keep it inside a trusted network.',
       autostart: 'Start it when dsh starts',
       autostartHint: 'In Docker mode this only runs docker start on an existing container; it never creates one.',
 
-      paths: 'Data and mounts (all on the host)',
-      pathsHint: 'Leave a field empty to use the default; `~` means the home directory. The database, .env and tag_plugins live on the host, so recreating the container keeps them.',
+      paths: 'Data and downloads',
+      pathsHint: 'Everything lives under this one directory — database, .env, unpacked artifacts, tag plugins — and both runtimes share it, so switching keeps your memory. Empty uses the default; ~ works.',
       dataDir: 'Data directory',
       dataDirHint: 'Default: {def}',
-      dbFile: 'Database file',
-      dbFileHint: 'Default: {def}; its directory is mounted at /data',
-      envFile: 'Environment file',
-      envFileHint: 'Default: {def}; API keys and proxies go here, copied from env.example when missing',
-      tagPluginsDir: 'Tag plugins directory',
-      tagPluginsDirHint: 'Default: {def}; mounted at /app/backend/tag_plugins',
-      dockerBind: 'Listen address',
-      dockerPort: 'Port',
-      bindHint: 'Default 127.0.0.1',
-      portHint: 'Default 8710',
-      image: 'Image',
-      container: 'Container name',
+      proxy: 'Download proxy',
+      proxyHint: 'https://gh-proxy.com by default, used to fetch the artifact from GitHub Releases; in Docker mode it is also written into ~/.docker/config.json for pulls. Empty means a direct connection.',
 
       applied: 'In effect',
-      home: 'Home directory',
-      platform: 'Platform',
-      bindWarning: 'The port is not bound to a loopback address: the Horon service has no auth, so anyone who can reach it can read and write your memory database.',
 
       save: 'Save',
       saving: 'Saving…',
@@ -218,9 +156,7 @@ window.__ModuleLoader__.load({
       copyFailed: 'The browser refused clipboard access; select the text below instead.',
       tabCommands: 'Commands',
       tabCompose: 'compose',
-      tabDockerfile: 'Dockerfile',
       tabEnv: '.env example',
-      noContext: 'The image has not been pulled yet: press Deploy now.',
 
       onboardingTitle: 'Choose how to run it',
       onboardingNote: 'The Horon service needs a runtime. Pick one and it is ready; you can change it later under Settings → Horon service.',
@@ -532,12 +468,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    const DEFAULTS = {
-      dockerBind: '127.0.0.1',
-      dockerPort: '8710',
-      container: 'horon',
-    }
-
     function SettingsSection(props) {
       const t = props.t ?? ((key) => key)
 
@@ -728,17 +658,16 @@ window.__ModuleLoader__.load({
 
       const resolved = preview?.resolved ?? data?.resolved ?? {}
       const texts = preview?.texts ?? data?.texts ?? {}
-      const mode = draft.mode ?? data?.mode ?? 'spawn'
+      // Only the two runtimes a user actually picks between; spawn/url stay in the code for
+      // development and for an existing remote service, but they are not offered here.
+      const mode = draft.mode === 'docker' ? 'docker' : 'artifact'
       const serving = preview?.serving ?? status?.serving
       const docker = status?.docker
       const hooks = status?.hooks
-      const bind = resolved.dockerBind ?? DEFAULTS.dockerBind
-      const bindIsLoopback = ['127.0.0.1', 'localhost', '::1'].includes(String(bind))
 
       const blocks = [
         ['commands', t('tabCommands'), texts.commands],
         ['compose', t('tabCompose'), texts.compose],
-        ['dockerfile', t('tabDockerfile'), texts.dockerfile],
         ['env', t('tabEnv'), texts.envExample],
       ]
       const active = blocks.find(([key]) => key === tab) ?? blocks[0]
@@ -758,21 +687,10 @@ window.__ModuleLoader__.load({
             h(
               'select',
               { className: 'dshhw-select', value: mode, onChange: (event) => update({ mode: event.target.value }) },
-              h('option', { value: 'spawn' }, t('modeSpawn')),
               h('option', { value: 'artifact' }, t('modeArtifact')),
               h('option', { value: 'docker' }, t('modeDocker')),
-              h('option', { value: 'url' }, t('modeUrl')),
             ),
           ),
-          mode === 'url'
-            ? h(TextField, {
-                label: t('url'),
-                value: draft.url,
-                placeholder: 'http://127.0.0.1:8710',
-                width: '320px',
-                onChange: (value) => update({ url: value }),
-              })
-            : null,
           h(
             'label',
             { className: 'dshhw-check', title: t('autostartHint') },
@@ -784,42 +702,17 @@ window.__ModuleLoader__.load({
             t('autostart'),
           ),
         ),
-        h('div', { className: 'dshhw-note' }, mode === 'artifact' ? t('modeHintArtifact') : mode === 'docker' ? t('modeHintDocker') : mode === 'url' ? t('modeHintUrl') : t('modeHintSpawn')),
-        mode === 'url' ? h('div', { className: 'dshhw-hint' }, t('urlHint')) : null,
-
-        // Artifact mode: the released tree, its pin, and where it lands.
+        h('div', { className: 'dshhw-note' }, mode === 'artifact' ? t('modeHintArtifact') : t('modeHintDocker')),
         mode === 'artifact'
           ? h(
               'div',
-              { className: 'dshhw-section' },
-              h('h4', null, t('artifact')),
-              h('div', { className: 'dshhw-note' }, t('artifactHint')),
-              h(TextField, {
-                label: t('artifactDir'),
-                value: draft.artifactDir,
-                placeholder: data?.artifact?.dir ?? data?.defaultArtifactDir ?? '',
-                hint: t('artifactDirHint', { def: data?.defaultArtifactDir ?? data?.artifact?.dir ?? '' }),
-                onChange: (value) => update({ artifactDir: value }),
-              }),
-              h(TextField, {
-                label: t('artifactUrl'),
-                value: draft.artifactUrl,
-                placeholder: data?.artifact?.url ?? '',
-                hint: t('artifactUrlHint'),
-                onChange: (value) => update({ artifactUrl: value }),
-              }),
-              h(
-                'div',
-                { className: 'dshhw-hint' },
-                `${t('artifactPin')}: ${(data?.artifact?.commit ?? '').slice(0, 8)} · ${data?.artifact?.platform ?? ''} · ${t('artifactState')}: ${
-                  data?.artifactState?.ready === true
-                    ? t('artifactReady')
-                    : data?.artifactState?.installed === true
-                      ? t('artifactPending')
-                      : t('artifactMissing')
-                }`,
-              ),
-              h('div', { className: 'dshhw-hint' }, t('dataDirShared')),
+              { className: 'dshhw-hint' },
+              data?.artifactState?.ready === true
+                ? t('artifactReadyHint', {
+                    commit: (data?.artifact?.commit ?? '').slice(0, 8),
+                    platform: data?.artifact?.platform ?? '',
+                  })
+                : t('artifactMissingHint'),
             )
           : null,
 
@@ -855,7 +748,7 @@ window.__ModuleLoader__.load({
               ),
         ),
 
-        // Host mounts
+        // One directory decides everything else: database, key file, releases, tag plugins.
         h(
           'div',
           { className: 'dshhw-section' },
@@ -869,63 +762,18 @@ window.__ModuleLoader__.load({
             onChange: (value) => update({ dataDir: value }),
           }),
           h(TextField, {
-            label: t('dbFile'),
-            value: draft.dbFile,
-            placeholder: resolved.dbFile ?? '',
-            hint: t('dbFileHint', { def: resolved.dbFile ?? '' }),
-            onChange: (value) => update({ dbFile: value }),
-          }),
-          h(TextField, {
-            label: t('envFile'),
-            value: draft.envFile,
-            placeholder: resolved.envFile ?? '',
-            hint: t('envFileHint', { def: resolved.envFile ?? '' }),
-            onChange: (value) => update({ envFile: value }),
-          }),
-          h(TextField, {
-            label: t('tagPluginsDir'),
-            value: draft.tagPluginsDir,
-            placeholder: resolved.tagPluginsDir ?? '',
-            hint: t('tagPluginsDirHint', { def: resolved.tagPluginsDir ?? '' }),
-            onChange: (value) => update({ tagPluginsDir: value }),
+            label: t('proxy'),
+            value: draft.proxy,
+            placeholder: data?.defaultProxy ?? '',
+            hint: t('proxyHint'),
+            onChange: (value) => update({ proxy: value }),
           }),
           h(
             'div',
-            { className: 'dshhw-row' },
-            h(TextField, {
-              label: t('dockerBind'),
-              value: draft.dockerBind,
-              placeholder: DEFAULTS.dockerBind,
-              hint: t('bindHint'),
-              width: '170px',
-              onChange: (value) => update({ dockerBind: value }),
-            }),
-            h(TextField, {
-              label: t('dockerPort'),
-              value: draft.dockerPort === undefined ? '' : String(draft.dockerPort),
-              placeholder: DEFAULTS.dockerPort,
-              hint: t('portHint'),
-              width: '110px',
-              onChange: (value) => update({ dockerPort: value }),
-            }),
-            h(TextField, {
-              label: t('image'),
-              value: draft.image,
-              placeholder: texts.image ?? '',
-              width: '200px',
-              onChange: (value) => update({ image: value }),
-            }),
-            h(TextField, {
-              label: t('container'),
-              value: draft.container,
-              placeholder: DEFAULTS.container,
-              width: '150px',
-              onChange: (value) => update({ container: value }),
-            }),
+            { className: 'dshhw-hint' },
+            `${t('applied')}: ${resolved.dbFile ?? ''} · ${resolved.envFile ?? ''} · ${resolved.base ?? ''}`,
           ),
-          h('div', { className: 'dshhw-hint' }, `${t('home')}: ${data?.home ?? ''} · ${t('platform')}: ${data?.platform ?? ''}`),
-          h('div', { className: 'dshhw-hint' }, `${t('applied')}: ${resolved.dataDir ?? ''} → ${resolved.base ?? ''}`),
-          bindIsLoopback ? null : h('div', { className: 'dshhw-warn' }, t('bindWarning')),
+          h('div', { className: 'dshhw-note' }, t('saveNote')),
           h('div', { className: 'dshhw-note' }, t('saveNote')),
           h(
             'div',
@@ -995,7 +843,7 @@ window.__ModuleLoader__.load({
           h('div', { className: 'dshhw-note' }, t('deployNote')),
           active[2]
             ? h('pre', { className: 'dshhw-code' }, active[2])
-            : h('div', { className: 'dshhw-warn' }, texts.contextReady === false ? t('noContext') : t('loading')),
+            : h('div', { className: 'dshhw-warn' }, t('loading')),
           h('textarea', {
             ref: clip,
             className: 'dshhw-clip',

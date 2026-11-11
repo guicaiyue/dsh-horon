@@ -21,6 +21,16 @@ import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+  dbFileFor,
+  envFileFor,
+  expandHome,
+  proxyOf,
+  proxied,
+  resolveDataDir,
+  runtimeDirFor,
+  tagPluginsDirFor,
+} from './paths.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const LOCK_FILE = path.join(HERE, 'horon.lock.json')
@@ -28,10 +38,6 @@ const INSTALLED = '.installed.json'
 const READY = path.join('app', '.ready.json')
 
 const text = (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined)
-
-function expandHome(value) {
-  return value === '~' || /^~[\\/]/.test(value) ? path.join(os.homedir(), value.slice(1)) : value
-}
 
 /** Bumped by CI; read at runtime so one package version can describe several deployments. */
 export function readLock() {
@@ -50,8 +56,8 @@ export function platformKey(platform = process.platform, arch = process.arch) {
   return `${platform}-${arch}`
 }
 
-export function defaultArtifactDir() {
-  return path.join(os.homedir(), '.horon', 'runtime')
+export function defaultArtifactDir(dataDir) {
+  return runtimeDirFor(dataDir ?? resolveDataDir({}))
 }
 
 function venvPython(appDir) {
@@ -66,7 +72,9 @@ export function artifactSettings(config) {
   const lock = readLock()
   const commit = text(c.horonCommit) ?? lock?.horon?.commit ?? ''
   const platform = platformKey()
-  const dir = path.resolve(expandHome(text(c.artifactDir) ?? defaultArtifactDir()))
+  const root = resolveDataDir(c)
+  // Unpacked releases live under the data directory, so one path covers the lot.
+  const dir = path.resolve(expandHome(text(c.artifactDir) ?? runtimeDirFor(root)))
   const staged = path.join(dir, `${commit.slice(0, 8)}-${platform}`)
   const short = commit.slice(0, 8)
   // `{commit8}` / `{platform}` keep one commit bump from scattering stale names over the release.
@@ -74,7 +82,10 @@ export function artifactSettings(config) {
   const given = text(c.artifactUrl)
   const name = fill(given ?? lock?.artifact?.asset ?? 'horon-app-{platform}-{commit8}.tar.gz')
   const baseUrl = fill(text(c.artifactBaseUrl) ?? lock?.artifact?.baseUrl ?? '')
-  const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(name) ? name : `${baseUrl.replace(/\/+$/, '')}/${name}`
+  const direct = /^[a-z][a-z0-9+.-]*:\/\//i.test(name) ? name : `${baseUrl.replace(/\/+$/, '')}/${name}`
+  // GitHub releases are the only source; the proxy is what makes them reachable.
+  const proxy = proxyOf(c)
+  const url = proxied(direct, proxy)
   return {
     platform,
     commit,
@@ -87,16 +98,15 @@ export function artifactSettings(config) {
     sha256: lock?.artifact?.sha256?.[platform] ?? text(c.artifactSha256) ?? '',
     // The interpreter bootstrap runs with; the venv it creates is what the service runs on.
     basePython: text(c.python) ?? (process.platform === 'win32' ? 'python' : 'python3'),
-    // Shared with docker mode on purpose: switching modes keeps the database, .env and tag plugins.
-    dataDir: path.resolve(expandHome(text(c.dataDir) ?? path.join(os.homedir(), '.horon', 'docker'))),
-    // An explicit dbFile / envFile wins, so a user who ran docker mode keeps the very same memory
-    // file and API keys after switching. "My notes are gone" must not be the first report.
-    dbFile: text(c.dbFile)
-      ? path.resolve(expandHome(text(c.dbFile)))
-      : path.join(path.resolve(expandHome(text(c.dataDir) ?? path.join(os.homedir(), '.horon', 'docker'))), 'data', 'horon.db'),
-    envFile: text(c.envFile)
-      ? path.resolve(expandHome(text(c.envFile)))
-      : path.join(path.resolve(expandHome(text(c.dataDir) ?? path.join(os.homedir(), '.horon', 'docker'))), '.env'),
+    // One directory for both runtimes: switching keeps the database, the key file and tag plugins.
+    dataDir: root,
+    dbFile: text(c.dbFile) ? path.resolve(expandHome(text(c.dbFile))) : dbFileFor(root),
+    envFile: text(c.envFile) ? path.resolve(expandHome(text(c.envFile))) : envFileFor(root),
+    proxy: proxyOf(c),
+    // tag plugins are personal: they never travel in the release, so the user's directory is
+    // mirrored into the unpacked tree on every start.
+    tagPluginsDir: tagPluginsDirFor(root),
+    directUrl: direct,
     lock,
   }
 }
@@ -246,6 +256,40 @@ async function writeEnv(a, log) {
 }
 
 /**
+ * Mirror the user's tag plugins into the unpacked release.
+ *
+ * The release only carries the system plugins (state/action/result/exit by upstream allow-list);
+ * anything a user wrote for themselves lives in the data directory. Docker mode bind-mounts that
+ * directory over the same path, so this walk is what artifact mode needs to behave identically.
+ */
+async function syncTagPlugins(a, log) {
+  const target = path.join(a.appDir, 'backend', 'tag_plugins')
+  let names
+  try {
+    names = await fs.readdir(a.tagPluginsDir)
+  } catch {
+    return
+  }
+  const files = names.filter((name) => name.endsWith('.py'))
+  if (files.length === 0) return
+  await fs.mkdir(target, { recursive: true })
+  let copied = 0
+  for (const name of files) {
+    const from = path.join(a.tagPluginsDir, name)
+    const to = path.join(target, name)
+    try {
+      const [source, current] = await Promise.all([fs.stat(from), fs.stat(to).catch(() => undefined)])
+      if (current !== undefined && current.size === source.size && current.mtimeMs >= source.mtimeMs) continue
+      await fs.copyFile(from, to)
+      copied += 1
+    } catch {
+      // A plugin that cannot be read is skipped; the service logs its own loading errors.
+    }
+  }
+  if (copied > 0) log(`tag plugins: ${String(copied)} file(s) synced from ${a.tagPluginsDir}`)
+}
+
+/**
  * Make sure this pinned release is unpacked and its runtime is installed.
  * Resolves to `{ root, python }` for the spawn path; throws with a readable message otherwise.
  */
@@ -257,8 +301,10 @@ export async function provisionArtifact(a, log = () => {}) {
   const python = venvPython(a.appDir)
   if (existsSync(marker) && existsSync(python)) {
     log(`artifact already installed at ${a.root}`)
-    // Still reconcile app/.env: the config may name a different database since the last start.
+    // Still reconcile both: the config may name a different directory since the last start, and
+    // tag plugins may have been edited.
     await writeEnv(a, log)
+    await syncTagPlugins(a, log)
     return { root: a.appDir, python }
   }
 
@@ -297,6 +343,7 @@ export async function provisionArtifact(a, log = () => {}) {
   log(`unpacking into ${a.root}`)
   await extract(archive, a.root, log)
   await writeEnv(a, log)
+  await syncTagPlugins(a, log)
 
   log('installing the runtime from the bundled wheels (no network)')
   const done = await run(a.basePython, [path.join(a.root, 'bootstrap.py')], {

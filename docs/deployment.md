@@ -5,10 +5,14 @@ dsh-horon 把 Horon 服务当成**已发布的产物**来取用，而不是让�
 
 | 方式 | 用户侧前置 | 取什么 | 数据目录 |
 | --- | --- | --- | --- |
-| `artifact` | Python 3.12 | GitHub Release 里的 `horon-app-<platform>-<commit8>.tar.gz` | `~/.horon/docker` |
-| `docker` | Docker | Docker Hub 上 `<image.name>:<tag>` | `~/.horon/docker` |
-| `spawn` | 本机 Horon 克隆 | 直接跑 `root/frontend/cli.py`（开发用） | 克隆目录 |
-| `url` | 一个跑着的服务 | 只记地址 | — |
+| `artifact` | Python 3.12 | GitHub Release 里的 `horon-app-<platform>-<commit8>.tar.gz`，走 `proxy`（默认 `https://gh-proxy.com`） | `<dataDir>`，默认 `~/.horon` |
+| `docker` | Docker | Docker Hub 上 `<image.name>:<tag>`；`proxy` 写进 `~/.docker/config.json` 供拉取 | `<dataDir>`，挂到容器 `/data` |
+| `spawn`（开发用，不在面板上） | 本机 Horon 克隆 | 直接跑 `root/frontend/cli.py` | 克隆目录 |
+| `url`（不在面板上） | 一个跑着的服务 | 只记地址 | — |
+
+`<dataDir>` 是唯一要填的路径，其余全部由它派生：`horon.db`、`.env`、`runtime/<commit8>-<platform>/`、
+`tag_plugins/`。个人 tag 插件不在发布物里，artifact 模式每次启动会从 `<dataDir>/tag_plugins`
+镜像进构建物的 `app/backend/tag_plugins`，docker 模式则直接挂载同一目录。
 
 `artifact` 与 `docker` 共用同一个数据目录，所以随时换方式、换版本都不会丢记忆库；
 `artifact` 的每个版本解包到 `~/.horon/runtime/<commit8>-<platform>/`，回滚就是把

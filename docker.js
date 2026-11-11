@@ -21,6 +21,16 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readLock } from './artifact.js'
+import {
+  dbFileFor,
+  defaultDataDir,
+  envFileFor,
+  expandHome,
+  localDirFor,
+  proxyOf,
+  resolveDataDir,
+  tagPluginsDirFor,
+} from './paths.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const DOCKER_DIR = path.join(HERE, 'docker')
@@ -29,6 +39,8 @@ const CONTAINER_PORT = 8710
 const LOG_LIMIT = 256 * 1024
 const READY_TIMEOUT_MS = 120_000
 const STATUS_TIMEOUT_MS = 8000
+// Same file Docker Desktop's own proxy settings are written to.
+const DOCKER_CONFIG = path.join(os.homedir(), '.docker', 'config.json')
 
 /** The published image this plugin version was built against. */
 export function defaultImage() {
@@ -36,9 +48,7 @@ export function defaultImage() {
   return image?.name && image?.tag ? `${image.name}:${image.tag}` : 'horon-service:local'
 }
 
-export function defaultDataDir() {
-  return path.join(os.homedir(), '.horon', 'docker')
-}
+export { defaultDataDir, expandHome }
 
 // Host part of a URL for a bind address; a wildcard bind is reached on loopback.
 export function urlHost(host) {
@@ -54,36 +64,30 @@ function hostTimeZone() {
   }
 }
 
-// `~` / `~/…` / `~\…` is the home directory of the user running dsh, so one config works on both
-// Windows and Linux.
-export function expandHome(value) {
-  return value === '~' || /^~[\\/]/.test(value) ? path.join(os.homedir(), value.slice(1)) : value
-}
-
-// Docker settings with every default filled in. Paths that are not set follow dataDir.
+// Docker settings with every default filled in. Everything derives from `dataDir`; the container
+// itself is fixed (loopback, 8710, the published image), because none of that is a decision a user
+// should have to make.
 export function dockerSettings(config) {
   const c = config ?? {}
   const text = (value) => (typeof value === 'string' && value.trim() ? value.trim() : undefined)
-  const file = (value) => {
-    const given = text(value)
-    return given === undefined ? undefined : path.resolve(expandHome(given))
-  }
-  const dataDir = file(c.dataDir) ?? defaultDataDir()
-  const dbFile = file(c.dbFile) ?? path.join(dataDir, 'data', 'horon.db')
-  const dockerBind = text(c.dockerBind) ?? '127.0.0.1'
-  const dockerPort = Number(c.dockerPort ?? 8710)
+  const root = resolveDataDir(c)
+  const dockerBind = '127.0.0.1'
+  const dockerPort = 8710
   return {
-    dataDir,
-    dbFile,
-    dbDir: path.dirname(dbFile),
-    localDir: path.join(dataDir, 'local'),
-    envFile: file(c.envFile) ?? path.join(dataDir, '.env'),
-    tagPluginsDir: file(c.tagPluginsDir) ?? path.join(dataDir, 'tag_plugins'),
+    dataDir: root,
+    root,
+    // The directory bind-mounted at /data; the database sits directly in it, which is the same
+    // layout artifact mode uses, so switching runtimes finds the same file.
+    dbFile: text(c.dbFile) ? path.resolve(expandHome(text(c.dbFile))) : dbFileFor(root),
+    dbDir: path.dirname(text(c.dbFile) ? path.resolve(expandHome(text(c.dbFile))) : dbFileFor(root)),
+    localDir: localDirFor(root),
+    envFile: text(c.envFile) ? path.resolve(expandHome(text(c.envFile))) : envFileFor(root),
+    tagPluginsDir: tagPluginsDirFor(root),
     dockerBind,
     dockerPort,
-    image: text(c.image) ?? defaultImage(),
-    container: text(c.container) ?? 'horon',
-    buildProxy: text(c.buildProxy) ?? '',
+    image: defaultImage(),
+    container: 'horon',
+    proxy: proxyOf(c),
     timeZone: hostTimeZone(),
     base: `http://${urlHost(dockerBind)}:${dockerPort}`,
   }
@@ -233,14 +237,14 @@ export async function renderTexts(d, platform = process.platform) {
 
 // ---- running docker --------------------------------------------------------------------------
 
-function runDocker(args, { onData, timeoutMs } = {}) {
+function runDocker(args, { onData, timeoutMs, env } = {}) {
   return new Promise((resolve) => {
     let child
     try {
       child = spawn('docker', args, {
         shell: false,
         windowsHide: true,
-        env: { ...process.env, DOCKER_CLI_HINTS: 'false' },
+        env: { ...process.env, DOCKER_CLI_HINTS: 'false', ...env },
       })
     } catch (error) {
       resolve({ code: -1, out: '', err: String(error?.message ?? error) })
@@ -272,6 +276,55 @@ function runDocker(args, { onData, timeoutMs } = {}) {
 }
 
 const firstLine = (text) => String(text ?? '').trim().split(/\r?\n/).pop() ?? ''
+
+/**
+ * `docker pull` runs in the engine, not in this process, so an environment variable here cannot
+ * reach it. Docker Desktop reads `proxies` from ~/.docker/config.json — the same file its own
+ * Settings page writes — so the proxy is recorded there before a pull. A Linux engine keeps that
+ * value in its service unit instead, and the log says so rather than pretending it took effect.
+ */
+async function applyDockerProxy(proxy, say) {
+  if (proxy === '') {
+    say('\n# no download proxy configured; pulling directly\n')
+    return
+  }
+  let raw
+  let config = {}
+  try {
+    raw = await fs.readFile(DOCKER_CONFIG, 'utf8')
+    config = JSON.parse(raw)
+  } catch {
+    config = {}
+  }
+  const current = config.proxies?.default ?? {}
+  if (current.httpProxy === proxy && current.httpsProxy === proxy) {
+    say(`\n# docker already uses ${proxy}\n`)
+    return
+  }
+  if (raw !== undefined) {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+    await fs.writeFile(`${DOCKER_CONFIG}.horon-backup-${stamp}`, raw, 'utf8')
+    say(`\n# backed up config.json -> ${path.basename(DOCKER_CONFIG)}.horon-backup-${stamp}\n`)
+  }
+  config.proxies = {
+    ...(config.proxies ?? {}),
+    default: {
+      httpProxy: proxy,
+      httpsProxy: proxy,
+      noProxy: current.noProxy ?? 'localhost,127.0.0.1,::1',
+    },
+  }
+  await fs.mkdir(path.dirname(DOCKER_CONFIG), { recursive: true })
+  await fs.writeFile(DOCKER_CONFIG, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
+  say(`# recorded the proxy in ${DOCKER_CONFIG}\n`)
+  say('# Docker Desktop applies it; a Linux engine needs the same value in its service config\n')
+}
+
+// Some pulls (and `docker login`) do honour the client environment, so pass it along as well.
+function proxyEnv(proxy) {
+  if (proxy === '') return {}
+  return { HTTP_PROXY: proxy, HTTPS_PROXY: proxy, http_proxy: proxy, https_proxy: proxy }
+}
 
 export async function isServing(base, timeoutMs = 1200) {
   try {
@@ -397,6 +450,8 @@ async function deploy(d, say) {
     return false
   }
 
+  await applyDockerProxy(d.proxy, say)
+
   // Something else on the port (typically a spawn/artifact-mode service) would make `docker run`
   // fail after a long pull; stop early instead. Our own running container is replaced below.
   const inspect = await runDocker(['inspect', '--type', 'container', '--format', '{{.State.Running}}', d.container])
@@ -419,7 +474,8 @@ async function deploy(d, say) {
     say(`created ${d.envFile} from env.example; put the API keys / proxy there\n`)
   }
 
-  if ((await step(flat(plan.pull))).code !== 0) return false
+  say(`\n$ docker ${flat(plan.pull).map(quotePosix).join(' ')}\n`)
+  if ((await runDocker(flat(plan.pull), { onData: say, env: proxyEnv(d.proxy) })).code !== 0) return false
   await step(flat(plan.remove)) // "No such container" on the first deploy is fine
   if ((await step(flat(plan.run))).code !== 0) return false
 

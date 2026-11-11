@@ -31,9 +31,15 @@ assert.equal(platformKey('darwin', 'arm64'), 'macos-arm64')
 
 const defaults = artifactSettings({})
 assert.match(defaults.platform, /^(win|linux|macos)-/)
+// One data directory decides everything else.
+assert.ok(defaults.dataDir.endsWith('.horon'), defaults.dataDir)
+assert.equal(path.dirname(defaults.dbFile), defaults.dataDir)
 assert.ok(defaults.dir.endsWith(path.join('.horon', 'runtime')), defaults.dir)
-assert.ok(defaults.url.startsWith('https://github.com/'), defaults.url)
-assert.ok(defaults.dataDir.endsWith(path.join('.horon', 'docker')), defaults.dataDir)
+// Releases are fetched through the proxy by default, and directly when it is cleared.
+assert.equal(defaults.proxy, 'https://gh-proxy.com')
+assert.ok(defaults.url.startsWith('https://gh-proxy.com/https://github.com/'), defaults.url)
+const direct = artifactSettings({ proxy: '' })
+assert.ok(direct.url.startsWith('https://github.com/'), direct.url)
 
 const pinned = artifactSettings({ horonCommit: 'a'.repeat(40) })
 assert.equal(pinned.commit8, 'a'.repeat(8))
