@@ -41,12 +41,12 @@ window.__ModuleLoader__.load({
       sectionTitle: 'Horon 服务',
       loading: '正在读取配置…',
       mode: '运行方式',
-      modeArtifact: '构建物（免 Docker）',
-      modeDocker: 'Docker 容器（本机）',
-      modeHintArtifact: '从 GitHub Release 下载 CI 发布的构建物，解包到数据目录里直接跑：不需要 Horon 仓库，也不需要 git / npm / Docker。',
-      modeHintDocker: '拉取 CI 发布的镜像并作为本机容器运行，数据挂载到同一个数据目录。',
-      artifactReadyHint: '已就绪：构建物 {commit} · {platform}，位于数据目录的 runtime 下。',
-      artifactMissingHint: '还没下载：点「下载并安装」后会按锁定 commit 下载、校验摘要、离线装依赖。',
+      modeArtifact: '正常启动（不用 Docker）',
+      modeDocker: 'Docker 启动',
+      modeHintArtifact: '下载官方发布并打包好的 Horon，解包到数据目录里直接运行：不需要 Horon 仓库，也不需要 git / npm / Docker，只要本机有 Python 3.12。',
+      modeHintDocker: '拉取官方镜像并作为本机容器运行，数据挂载到同一个数据目录；需要本机装了 Docker。',
+      artifactReadyHint: '已就绪：版本 {commit} · {platform}，位于数据目录的 runtime 下。',
+      artifactMissingHint: '还没下载：点右下角「下载并安装」，会下载、校验、装好依赖。',
       provision: '下载并安装',
       provisioning: '下载安装中…',
       provisionDone: '构建物已就绪，服务正在启动。',
@@ -55,7 +55,7 @@ window.__ModuleLoader__.load({
       autostartHint: 'Docker 模式下只会 docker start 已存在的容器，不会替你创建。',
 
       paths: '数据与下载',
-      pathsHint: '所有数据（数据库、.env、构建物、tag 插件）都在这一个目录下，两种运行方式共用，不会因为换方式丢记忆。留空用默认值，可以写 ~。',
+      pathsHint: '所有数据（数据库、.env、下载的运行时、tag 插件）都在这一个目录下，两种运行方式共用，不会因为换方式丢记忆。留空用默认值，可以写 ~。',
       dataDir: '数据目录',
       dataDirHint: '默认：{def}',
       proxy: '下载代理',
@@ -85,10 +85,10 @@ window.__ModuleLoader__.load({
 
       onboardingTitle: '先选一种运行方式',
       onboardingNote: 'Horon 服务需要一个运行时。选一种装好就能用；之后可在「设置 → Horon 服务」里随时改。',
-      onboardingArtifact: '下载构建物（要 Python 3.12，不要 Docker）',
-      onboardingDocker: '拉取 Docker 镜像（要本机 Docker）',
+      onboardingArtifact: '正常启动（要 Python 3.12，不要 Docker）',
+      onboardingDocker: 'Docker 启动（要本机装了 Docker）',
       onboardingLater: '稍后再说',
-      onboardingSize: '构建物约 40 MB；镜像约 250 MB。两种方式的数据目录相同，随时可以换。',
+      onboardingSize: '正常启动约 40 MB；Docker 镜像约 250 MB。两种方式共用一个数据目录，随时可以换。',
       onboardingWorking: '正在安装，进度见「设置 → Horon 服务」的日志。',
 
       statusServing: '服务可访问',
@@ -103,6 +103,8 @@ window.__ModuleLoader__.load({
       guardDenied: '本次共拒绝',
       guardFailed: '网关失败',
       guardHint: '拦截链只负责问 Horon；真正拦不拦，取决于库里的 guard 电路与 tool_guards 规则。新装的库是空的，所以「拒绝 0 次」通常表示没有规则，而不是规则放行。',
+      guardFailedHint: '网关失败：这次插件挂载以来，有多少次请求没送到 Horon（连不上、超时或返回错误）。这些调用因为 fail-open 没有被检查，最常见的原因是 Horon 服务正在重启。',
+      guardLastError: '最近一次',
     }
 
     const en = {
@@ -116,12 +118,12 @@ window.__ModuleLoader__.load({
       sectionTitle: 'Horon service',
       loading: 'Loading the settings…',
       mode: 'Mode',
-      modeArtifact: 'Build artifact (no Docker)',
-      modeDocker: 'Docker container (this host)',
+      modeArtifact: 'Normal start (no Docker)',
+      modeDocker: 'Docker start',
       modeHintArtifact: 'Downloads the artifact CI released from GitHub, unpacks it under the data directory and runs it: no Horon repository, no git, no npm, no Docker.',
       modeHintDocker: 'Pulls the image CI released and runs it as a local container, with the same data directory mounted in.',
-      artifactReadyHint: 'Ready: artifact {commit} · {platform}, under the data directory runtime folder.',
-      artifactMissingHint: 'Not downloaded yet: Download and install fetches the pinned commit, verifies the digest and installs the runtime offline.',
+      artifactReadyHint: 'Ready: version {commit} · {platform}, under the data directory runtime folder.',
+      artifactMissingHint: 'Not downloaded yet: press Download and install; it fetches, verifies and installs the runtime.',
       provision: 'Download and install',
       provisioning: 'Downloading…',
       provisionDone: 'The artifact is ready; the service is starting.',
@@ -130,7 +132,7 @@ window.__ModuleLoader__.load({
       autostartHint: 'In Docker mode this only runs docker start on an existing container; it never creates one.',
 
       paths: 'Data and downloads',
-      pathsHint: 'Everything lives under this one directory — database, .env, unpacked artifacts, tag plugins — and both runtimes share it, so switching keeps your memory. Empty uses the default; ~ works.',
+      pathsHint: 'Everything lives under this one directory — database, .env, the downloaded runtime, tag plugins — and both runtimes share it, so switching keeps your memory. Empty uses the default; ~ works.',
       dataDir: 'Data directory',
       dataDirHint: 'Default: {def}',
       proxy: 'Download proxy',
@@ -141,8 +143,8 @@ window.__ModuleLoader__.load({
       save: 'Save',
       saving: 'Saving…',
       reset: 'Revert',
-      saveNote: 'Saving rewrites the profile cordis.patch.yml and reloads the plugin right away: the local-process service is restarted, and a port change needs a page reload.',
-      saved: 'Saved; the plugin is reloading. Reload the page if the port changed.',
+      saveNote: 'Saving rewrites the profile cordis.patch.yml and reloads the plugin right away: the service restarts with the new runtime and directory.',
+      saved: 'Saved; the plugin is reloading.',
       editBlocked: 'This dsh exposes no configuration editor; edit the profile cordis.patch.yml by hand.',
 
       deploy: 'Deploy now',
@@ -160,10 +162,10 @@ window.__ModuleLoader__.load({
 
       onboardingTitle: 'Choose how to run it',
       onboardingNote: 'The Horon service needs a runtime. Pick one and it is ready; you can change it later under Settings → Horon service.',
-      onboardingArtifact: 'Download the artifact (Python 3.12, no Docker)',
-      onboardingDocker: 'Pull the Docker image (needs Docker here)',
+      onboardingArtifact: 'Normal start (Python 3.12, no Docker)',
+      onboardingDocker: 'Docker start (needs Docker here)',
       onboardingLater: 'Not now',
-      onboardingSize: 'The artifact is about 40 MB, the image about 250 MB. Both use the same data directory, so switching keeps your memory.',
+      onboardingSize: 'Normal start is about 40 MB, the Docker image about 250 MB. Both share one data directory, so switching keeps your memory.',
       onboardingWorking: 'Installing; the log is under Settings → Horon service.',
 
       statusServing: 'Service reachable',
@@ -178,6 +180,8 @@ window.__ModuleLoader__.load({
       guardDenied: 'denied',
       guardFailed: 'gateway failures',
       guardHint: 'The chain only asks Horon; whether a call is blocked depends on the guard circuits and tool_guards rules in the database. A fresh database has none, so "denied 0" usually means no rules, not rules that passed.',
+      guardFailedHint: 'Gateway failures: requests that never reached Horon since this plugin mounted (connection refused, timeout, or an error response). Those calls go unchecked because the chain is fail-open; a service restart is the usual cause.',
+      guardLastError: 'last',
     }
 
     /** Calls the Host half and returns the parsed payload. */
@@ -743,8 +747,15 @@ window.__ModuleLoader__.load({
             ? null
             : h(
                 'span',
-                { className: hooks.degraded || hooks.failed > 0 ? 'dshhw-warn' : 'dshhw-status', title: t('guardHint') },
+                {
+                  className: hooks.degraded || hooks.failed > 0 ? 'dshhw-warn' : 'dshhw-status',
+                  title: hooks.failed > 0 ? `${t('guardHint')}
+${t('guardFailedHint')}` : t('guardHint'),
+                },
                 `${t('guardChain')}: ${hooks.enabled ? t('guardOn') : t('guardOff')} · ${t('guardDenied')} ${hooks.denied} · ${t('guardFailed')} ${hooks.failed}`,
+                hooks.failed > 0 && hooks.lastError
+                  ? ` (${t('guardLastError')}: ${String(hooks.lastError).slice(0, 80)})`
+                  : '',
               ),
         ),
 
@@ -773,7 +784,6 @@ window.__ModuleLoader__.load({
             { className: 'dshhw-hint' },
             `${t('applied')}: ${resolved.dbFile ?? ''} · ${resolved.envFile ?? ''} · ${resolved.base ?? ''}`,
           ),
-          h('div', { className: 'dshhw-note' }, t('saveNote')),
           h('div', { className: 'dshhw-note' }, t('saveNote')),
           h(
             'div',
