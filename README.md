@@ -19,8 +19,8 @@
 
 | mode | 做法 |
 | --- | --- |
-| `artifact` | **默认**。从 GitHub Release 下载 CI 发布的构建物（后端 + 打包好的控制台 + 依赖轮子），走 `proxy`，校验 sha256，解包到 `<dataDir>/runtime/` 并离线装好运行时，然后当本机进程跑。只要 Python 3.12，不需要 Docker / git / npm / Horon 仓库 |
-| `docker` | 拉 CI 发布的镜像并作为本机容器运行（`127.0.0.1:8710`，容器名 `horon`，镜像固定取自 `horon.lock.json`），`<dataDir>` 挂到 `/data`。本机不构建 |
+| `artifact`（面板显示「正常启动」） | **默认**。从 GitHub Release 下载 CI 打包好的 Horon（后端 + 打包好的控制台 + 依赖轮子），走 `proxy`，校验 sha256，解包到 `<dataDir>/runtime/` 并离线装好运行时，然后当本机进程跑。只要 Python 3.12，不需要 Docker / git / npm / Horon 仓库 |
+| `docker`（面板显示「Docker 启动」） | 拉 CI 发布的镜像并作为本机容器运行（`127.0.0.1:8710`，容器名 `horon`，镜像固定取自 `horon.lock.json`），`<dataDir>` 挂到 `/data`。本机不构建 |
 
 两者共用同一个数据目录，所以随时切换都不丢记忆；容器地址、镜像名、容器名都不需要用户填。
 
@@ -86,7 +86,7 @@ horon read_hook <guard 名或 ID>                            # 看它的 tool_gu
 horon set <guard 名> tool_guard 'pwsh' --args-pattern 'git\s+push'   # 在目标库里重建同一条规则
 ```
 
-电路之间的依赖（`AND` / `OR` / `CHAIN` / 抑制边）不会被一条 `tool_guard` 带过来，得按 `compile --target <guard>` 的依赖树逐个补；组装器也不复制 `tag_plugins` 里的个人插件，需要就手工拷进 `tagPluginsDir`（构建物模式下是 `<artifactDir>/<commit8>-<platform>/app/backend/tag_plugins`）。
+电路之间的依赖（`AND` / `OR` / `CHAIN` / 抑制边）不会被一条 `tool_guard` 带过来，得按 `compile --target <guard>` 的依赖树逐个补；个人 tag 插件放在 `<dataDir>/tag_plugins`，两种运行方式共用一个目录，不需要往构建物里手工拷（`artifact` 模式每次启动会自动镜像进去）。
 
 **怎么当场确认它在不在跑**：设置页「Horon 服务」那行现在多一个「拦截链」读数——`已挂载 · 本次共拒绝 N · 网关失败 M`，鼠标悬停看说明；`/dsh-horon/_dsh/status` 的 `hooks` 字段是同一份数据。
 
@@ -139,7 +139,7 @@ node test/host-smoke.mjs && node test/artifact-smoke.mjs      # 只跑纯函数�
 
 | key | 默认 | 说明 |
 | --- | --- | --- |
-| `mode` | 首次安装面板会问 | **面板只给两种**：`artifact`（构建物，免 Docker）、`docker`（拉镜像）。`spawn` / `url` 仍在代码里，供开发和接已有远端服务，不在面板上 |
+| `mode` | 首次安装面板会问 | **面板只给两种**：`artifact` 显示为「正常启动（不用 Docker）」，`docker` 显示为「Docker 启动」。`spawn` / `url` 仍在代码里，供开发和接已有远端服务，不在面板上 |
 | `dataDir` | `~/.horon` | **唯一的路径设置**。数据库、`.env`、构建物、tag 插件全部由它派生；两种运行方式共用 |
 | `proxy` | `https://gh-proxy.com` | 下载代理：构建物从 GitHub Release 取；docker 模式下同时写进 `~/.docker/config.json` 的 `proxies`。留空表示直连 |
 | `autostart` | `true` | `false` 只挂插件，不拉起服务/容器 |
