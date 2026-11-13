@@ -1,6 +1,6 @@
 {
   "name": "dsh-horon",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Horon memory graph as a DeepSeek Harness plugin: the horon tool, lifecycle hooks, the console panel and a one-click service runtime (released artifact or Docker image)",
   "type": "module",
   "license": "MIT",

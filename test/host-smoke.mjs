@@ -123,4 +123,81 @@ if (!serving) {
   console.log('healthy service:', JSON.stringify(liveStatus.hooks))
 }
 
+// ---- 5. recall nudge: fires once per turn, and only when nothing was looked up ----------------
+// A turn whose prompt reads like a recall question, with no retrieval call, gets steered once.
+{
+  const nudged = makeCtx()
+  mod.apply(nudged.ctx, { mode: 'url', url: 'http://127.0.0.1:9' })
+  const preStepN = nudged.handlers.get('agent/pre-step')[0]
+  const stopN = nudged.handlers.get('agent/turn-stopping')[0]
+  const steered = []
+  const agent = { id: 'smoke-nudge', steer: (m) => steered.push(m), session: { header: {} } }
+
+  await preStepN({ agent, messages: [] }, async () => ({
+    kind: 'enter',
+    messages: [{ source: { kind: 'user' }, content: [{ type: 'text', text: '本机的截图快捷键是怎么配的' }] }],
+  }))
+  await stopN({ agent, signal: undefined })
+  assert.equal(steered.length, 1, 'one nudge for a recall-shaped prompt that did not search')
+  assert.ok(String(steered[0].content?.[0]?.text ?? steered[0]).includes('查'), 'the nudge says to search')
+
+  // A second Stop in the same turn must not steer again.
+  await stopN({ agent, signal: undefined })
+  assert.equal(steered.length, 1, 'the nudge is once per turn')
+}
+
+// A turn that did search gets no nudge.
+{
+  const quiet = makeCtx()
+  mod.apply(quiet.ctx, { mode: 'url', url: 'http://127.0.0.1:9' })
+  const preStepQ = quiet.handlers.get('agent/pre-step')[0]
+  const preExecQ = quiet.handlers.get('tools/pre-execute')[0]
+  const stopQ = quiet.handlers.get('agent/turn-stopping')[0]
+  const steered = []
+  const agent = { id: 'smoke-quiet', steer: (m) => steered.push(m), session: { header: {} } }
+
+  await preStepQ({ agent, messages: [] }, async () => ({
+    kind: 'enter',
+    messages: [{ source: { kind: 'user' }, content: [{ type: 'text', text: '本机的截图快捷键是怎么配的' }] }],
+  }))
+  await preExecQ(
+    { name: 'horon', arguments: { args: ['search_keyword', '截图'] }, agent },
+    async () => ({ kind: 'allow' }),
+  )
+  await stopQ({ agent, signal: undefined })
+  assert.equal(steered.length, 0, 'a turn that already searched is not nudged')
+}
+
+// ---- 6. abort tells Horon to end the turn ---------------------------------------------------
+{
+  const aborted = makeCtx()
+  mod.apply(aborted.ctx, { mode: 'url', url: 'http://127.0.0.1:9' })
+  const stopA = aborted.handlers.get('agent/turn-stopping')[0]
+  const steered = []
+  const agent = { id: 'smoke-abort', steer: (m) => steered.push(m), session: { header: {} } }
+  const signal = { aborted: true }
+  await stopA({ agent, signal })
+  assert.equal(steered.length, 0, 'an aborted turn is not steered')
+  const st = await status(aborted.routes)
+  assert.ok(st.hooks.calls >= 1, 'abort still reached the gateway (Interrupt): ' + JSON.stringify(st.hooks))
+}
+
+// ---- 7. boot nodes are injected on the first turn (needs the live service) -------------------
+if (serving) {
+  const boot = makeCtx()
+  mod.apply(boot.ctx, { mode: 'url', url: LIVE })
+  const step = await boot.handlers.get('agent/pre-step')[0](
+    { agent: { id: `smoke-boot-${Date.now()}`, session: { header: {} } }, messages: [] },
+    async () => ({
+      kind: 'enter',
+      messages: [{ source: { kind: 'user' }, content: [{ type: 'text', text: 'hi' }] }],
+    }),
+  )
+  const texts = (step.messages ?? []).map((m) => m.content?.[0]?.text ?? '')
+  assert.ok(
+    texts.some((text) => text.includes('启动清单')),
+    'the first turn carries the boot nodes: ' + JSON.stringify(texts.map((t) => t.slice(0, 60))),
+  )
+}
+
 console.log('smoke ok')
