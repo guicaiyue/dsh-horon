@@ -11,8 +11,15 @@ dsh-horon 把 Horon 服务当成**已发布的产物**来取用，而不是让�
 | `url`（不在面板上） | 一个跑着的服务 | 只记地址 | — |
 
 `<dataDir>` 是唯一要填的路径，其余全部由它派生：`horon.db`、`.env`、`runtime/<commit8>-<platform>/`、
-`tag_plugins/`。个人 tag 插件不在发布物里，artifact 模式每次启动会从 `<dataDir>/tag_plugins`
-镜像进构建物的 `app/backend/tag_plugins`，docker 模式则直接挂载同一目录。
+`tag_plugins/`。这个目录里混着两种插件：
+
+- **包自带的默认插件**（目前是 `记忆入库`，见 `tag_plugins/` 与 `seed.js`）：安装后第一次启动时，
+  插件把文件从包里复制到 `<dataDir>/tag_plugins/`（已存在就不覆盖，用户改过的版本保留），
+  再在库里 `create_concept` + `create_tag` 注册这个 Tag。两步都幂等，每次启动都跑一遍也不会变。
+- **用户自己写的插件**：直接放进 `<dataDir>/tag_plugins/`。artifact 模式每次启动会把它镜像进
+  构建物的 `app/backend/tag_plugins`，docker 模式则直接挂载同一目录。
+
+所以 tag 插件既不在包外、也不在包内自动生效：**文件在包里，生效靠 `<dataDir>`**。
 
 `artifact` 与 `docker` 共用同一个数据目录，所以随时换方式、换版本都不会丢记忆库；
 `artifact` 的每个版本解包到 `~/.horon/runtime/<commit8>-<platform>/`，回滚就是把
@@ -118,3 +125,16 @@ This product uses Horon (https://github.com/Dataojitori/horon)
 
 镜像与构建物都带 `app/NOTICE`；插件 README、npm 页面和市场条目也写了这句。分发镜像即触发该条件，
 不要删。
+
+## 在 headless（autoloop）下
+
+`mode` 的四种取值与 Web 无关：`url` 和 `docker` 在 headless 里最好用，因为服务和库都在插件进程之外，
+每一轮新起的 dsh 进程只负责读写。
+
+插件在 headless 下少挂两样东西——控制台路由（`/dsh-horon/`）与 skills provider——它们都是通过
+`ctx.inject` 申请的，headless 不提供 `webServer` / `connection` / `skills`，于是自动跳过。剩下三样照常：
+`horon` 工具、记忆策略的 system-prompt 段、以及 `agent/pre-step` 等生命周期钩子。`test/host-smoke.mjs`
+第 9 段就是拿一个没有这三个服务的 ctx 跑 `apply()`，锁住这个不变量。
+
+编排器侧的注意点只有一条值得写进部署文档：**每轮都是新进程**，Horon 的会话状态靠编排器传同样的
+`--session-id` 才连续；换号就意味着 turn 级传感器每轮从零开始。

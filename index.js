@@ -61,7 +61,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { artifactSettings, artifactStatus, provisionArtifact } from './artifact.js'
-import { defaultDataDir, proxyOf } from './paths.js'
+import { defaultDataDir, proxyOf, resolveDataDir, tagPluginsDirFor } from './paths.js'
 import {
   deployState,
   dockerSettings,
@@ -72,6 +72,7 @@ import {
   startDeploy,
 } from './docker.js'
 import { applyHarness, defaultPython, defaultRoot } from './harness.js'
+import { seedTagPlugins } from './seed.js'
 
 export const name = 'dsh-horon'
 
@@ -135,11 +136,16 @@ function settings(config) {
         : 'spawn'
   const docker = dockerSettings(c)
   const artifact = artifactSettings(c)
+  // One path decides the database, the key file and the tag plugins; seeding needs the last one.
+  const dataDir = resolveDataDir(c)
+  const tagPluginsDir = tagPluginsDirFor(dataDir)
   // artifact mode owns its own interpreter: the venv bootstrap created inside the release.
   const root = mode === 'artifact' ? artifact.appDir : c.root ?? DEFAULT_ROOT
   return {
     mode,
     root,
+    dataDir,
+    tagPluginsDir,
     // The venv next to the root when it exists, so a fresh clone needs no `python` either.
     python: text(c.python) ?? defaultPython(root),
     host,
@@ -172,6 +178,34 @@ async function isServing(base, timeoutMs = 1200) {
   } catch {
     return false
   }
+}
+
+// Bundled tag plugins can only be installed once the service answers, and in every mode that
+// takes a while (a container start, an artifact download). Retry in the background so a slow start
+// never holds up dsh's own boot, and say one line per thing that actually changed.
+const SEED_TIMEOUT_MS = 90_000
+
+function seedBundledTagPlugins(s, log) {
+  if (!s.chosen) return
+  void (async () => {
+    const deadline = Date.now() + SEED_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      if (await isServing(s.base, 1500)) {
+        const result = await seedTagPlugins({ tagPluginsDir: s.tagPluginsDir, base: s.base })
+        for (const note of result.copied) log(`tag plugin installed: ${note}`)
+        for (const note of result.registered) log(`tag registered: ${note}`)
+        if (result.failed.length) log(`tag plugin: ${result.failed.join('; ')}`)
+        return
+      }
+      // Never hold the process open for a service that may never come up (or that a test
+      // deliberately points at a dead port).
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 1500)
+        timer.unref?.()
+      })
+    }
+    log(`tag plugin: ${s.base} did not answer within ${SEED_TIMEOUT_MS / 1000}s; skipped`)
+  })().catch((error) => log(`tag plugin: ${error?.message ?? error}`))
 }
 
 async function waitUntilServing(base, isStopped) {
@@ -791,6 +825,7 @@ export function apply(ctx, config) {
   })
   registerConsoleRoute(ctx, config, s)
   if (s.skills) registerSkills(ctx, s.root)
+  seedBundledTagPlugins(s, log)
 
   if (s.mode === 'artifact') {
     runService(ctx, {

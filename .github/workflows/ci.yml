@@ -56,8 +56,12 @@ jobs:
           npm pack --dry-run 2>&1 | tail -25
           # Every runtime file the host half imports must be in the published tarball; a missing
           # entry here is an install that cannot load.
-          for file in index.js harness.js client.js docker.js artifact.js paths.js horon_web_app.py horon.lock.json cordis.patch.yml scripts/bootstrap.py; do
+          for file in index.js harness.js client.js docker.js artifact.js paths.js seed.js horon_web_app.py horon.lock.json cordis.patch.yml scripts/bootstrap.py; do
             grep -q " $file" <<< "$(npm pack --dry-run 2>&1)" || { echo "missing from the package: $file"; exit 1; }
+          done
+          # Bundled tag plugins ship inside the package; the seeder copies them into <dataDir>.
+          for file in tag_plugins/记忆入库.py; do
+            grep -q " $file" <<< "$(npm pack --dry-run 2>&1)" || { echo "missing bundled tag plugin: $file"; exit 1; }
           done
           # The build inputs must not ride along: they are generated per release, not published.
           if npm pack --dry-run 2>&1 | grep -E 'docker/context|\.env$|\.db$'; then

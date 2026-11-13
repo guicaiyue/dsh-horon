@@ -112,7 +112,7 @@ function runPython(config, script, args, { stdin, env, signal, timeoutMs } = {})
 // POST `body` (a string is sent as is) to the Horon service; resolve {code, out, err} like
 // runPython. node:http rather than fetch: undici gives up on a response after 300 s, and an
 // `audit` over the whole graph can take longer (the service caps it, see horon_web_app.py).
-function postService(base, route, body, { signal, timeoutMs } = {}) {
+export function postService(base, route, body, { signal, timeoutMs } = {}) {
   const target = new URL(base + route)
   const client = target.protocol === 'https:' ? https : http
   const data = Buffer.from(typeof body === 'string' ? body : JSON.stringify(body), 'utf8')
