@@ -228,17 +228,46 @@ function contentText(content) {
     .join('\n')
 }
 
+// Retrieval commands: any of these means the model actually looked something up this turn.
+const RETRIEVAL_COMMANDS = new Set(['search_keyword', 'search_semantic', 'read_concept', 'recent', 'read_hook'])
+
+// Above this, a read_concept result is worth a note: the useful part is rarely the whole node.
+const LONG_NODE_BYTES = 4096
+
+// A prompt that reads like "recall something" rather than "do something". Used only to decide
+// whether to nudge once at Stop, so keep it narrow: a false positive costs one extra step.
+const RECALL_SIGNAL =
+  /(上次|之前|以前|早先|刚才|那个|本机|这台|为什么|怎么配|怎么设|是不是|有没有|还记得|你记的|我记得|上次说)/
+
 // Shown in every system prompt, so the storage contract travels with the plugin instead of
 // depending on a per-host AGENTS.md. Keep it in sync with the horon-cli manual (§2–3): this is a
 // summary for the moment a model decides what to write, not a second source of truth.
 const MEMORY_POLICY = [
-  'Horon 是可执行的记忆图谱，不是会话记录库。写入前按这套规则：',
+  'Horon 是可执行的记忆图谱，不是会话记录库。它有两半：读（什么时候该查）和写（怎么写）。',
+  '',
+  '【先查再答】出现下面任一情况，先查记忆再动手，不要凭印象答：',
+  '- 用户提到一个没在本会话展开过的专有名词、路径、版本号或历史约定（「上次那个」「你之前说的」）。',
+  '- 准备做高危或非标准操作：改系统配置、动服务、删/移目录、改发布链路。',
+  '- 用户纠偏（「不对」「不是这样」「你又忘了」）或话题漂移，说明手上的上下文可能缺前提。',
+  '- 要回答「本机/这台机器上 X 是怎么配的」这类事实问题。',
+  '怎么查：知道确切词（命令名、包名、路径、端口）用 `["search_keyword", "词"]`；说不出名字、只有场景，用 `["search_semantic", "大白话描述场景"]`。',
+  '两个命令的分工不能混：`search_keyword` 是整串子串匹配、搜名字+别名+书腰+正文，所以查单词可靠、查一句话会落空；',
+  '`search_semantic` 只对书腰（when_to_read）建向量，所以它匹配的是「什么情况下该打开」，不是正文里的术语。',
+  '查完再 `read_concept <id>` 取正文。查不到就明说查不到，不要编。',
+  '',
+  '【怎么写】',
   '- 一个节点只装一个可复用的概念：能改变下次做法的判断、状态、事实及其依据；不要把整段对话、工具输出或会话日志塞进节点。',
   '- 原始观察只作为 bullet 追加到对应情境节点的「原始记录」；「当前判断」只在自省时改写，被批评的当场不写解释。',
-  '- 同一概念只用一个规范节点，新建时写清 when_to_read（什么情况下要打开它），相关观察汇入正文；需要共同检索或维护时再建 Tag。',
+  '- 同一概念只用一个规范节点，新建时写清 when_to_read（什么情况下需要打开它），相关观察汇入正文；需要共同检索或维护时再建 Tag。',
   '- 写入前先 list_tags：有写时门禁 Tag（如「记忆入库」）时，新建节点后立刻挂上；被拒就按提示改正文再挂。',
   '- 下次那个时刻不会主动想起来查笔记的做法，做成 sensor/logic/guard 电路，而不是只写 plain。',
   '- 第一次写入前先读 horon-cli 说明书；会话开始时先运行 login 并读完输出。',
+  '',
+  '【写电路时的 dsh 键名】规则里的工具名和参数按 dsh 原样匹配，不是 Claude Code 的：',
+  '- 工具名：shell 是 `pwsh` 或 `bash`（跨宿主写成 `pwsh|bash`），读文件 `read`，改文件 `edit`，搜索 `grep`/`glob`。',
+  '- `--args-pattern` 是对序列化参数的整串正则（不是按 JSON 键匹配），所以写裸子串最稳：',
+  '  拦 git push 写 `--args-pattern "git push"`，不要写 `{"CommandLine": "^git push"}`（那是 Claude Code 的键名，在 dsh 上永远匹配不到、规则静默失效）。',
+  '- `pwsh` 的参数键是 `command`，`edit` 是 `path`/`old`/`new`，`read` 是 `path`。要按键定位就写成 `"command":\\s*"git push`。',
 ].join('\n')
 
 // The guard chain is fail-open by design (a dead service must not brick every tool call), so a
@@ -278,6 +307,10 @@ function registerTool(ctx, config) {
       `Run the Horon CLI: python frontend/cli.py <args>, ${where}` +
       `Pass each CLI argument as one array item; no shell quoting is applied. ` +
       `Horon is a concept graph for reusable judgments and state, not a store for chat transcripts. ` +
+      `Two search commands, not interchangeable: ["search_keyword", "<word>"] is a whole-string ` +
+      `substring match over name/alias/when_to_read/content (reliable for a single term, misses a ` +
+      `sentence); ["search_semantic", "<plain-language scene>"] matches only the when_to_read blurb by ` +
+      `vector (finds "when should I open this", not terms inside the body). Then ["read_concept", "<id>"]. ` +
       `Read the manual before first use: ${manual}`,
     parameters: {
       type: 'object',
@@ -310,6 +343,17 @@ function registerTool(ctx, config) {
           })
       const text = out + err
       if (code !== 0) throw new Error(`horon exited with code ${code}\n${text}`)
+      // A long node costs a lot of context to read and usually buries today's answer under days of
+      // history. Say so where the read happens; `audit` only reports above 8 KB, which is late.
+      const bytes = Buffer.byteLength(text, 'utf8')
+      if (args.args[0] === 'read_concept' && bytes > LONG_NODE_BYTES) {
+        return (
+          text +
+          `\n\n【Horon】这次读了 ${bytes} 字节（约 ${Math.round(bytes / 3)} 个汉字）。` +
+          '节点超过 4 KB 通常说明它装了多天历史：真正需要的那两句常在最前面或最后一条记录里。' +
+          '若它反复被读，考虑拆出「当前状态」段（只写今天有效的地址/版本/命令），历史留在下面。'
+        )
+      }
       return text
     },
   })
@@ -361,10 +405,36 @@ function registerHooks(ctx, config) {
     }
   }
 
+  // `login` prints the manual path, every node tagged `boot`, and the most recently changed
+  // nodes. The gateway's SessionStart banner does not include them, so a session that never runs
+  // `login` starts blind. Run it once per session and hand the text over as context.
+  const runBoot = async (sid, signal) => {
+    if (signal?.aborted) return ''
+    try {
+      const { code, out, err } = url
+        ? await runRemoteCli(url, ['login'], { sessionId: sid, cwd: process.cwd(), signal })
+        : await runPython(config, path.join('frontend', 'cli.py'), ['login'], {
+            env: { HORON_DSH_SESSION_ID: sid },
+            signal,
+          })
+      if (code !== 0) return ''
+      const text = out.trim()
+      if (!text) return ''
+      return `【Horon 启动清单】以下是这个会话的 boot 节点与最近改动，已替你跑过 login，不必再跑：\n${text}`
+    } catch (e) {
+      log(`login failed: ${e}`)
+      return ''
+    }
+  }
+
   const compacted = new Set() // sessions whose context was compacted or cleared, awaiting reset + banner
   const continuing = new Set() // sessions whose current step runs on our Stop steering
   const lastText = new Map() // sessionId -> text of the latest assistant message
   const queues = new Map() // sessionId -> tail of that session's gateway calls
+  const pendingPrompt = new Map() // sessionId -> the user prompt that started the current turn
+  const looked = new Set() // sessions that ran a retrieval command in the current turn
+  const nudged = new Set() // sessions already reminded to search this turn (one nudge per turn)
+  const booted = new Set() // sessions whose boot nodes were already injected
 
   // Parallel tool calls of one step run their pre/post-execute concurrently; gateway calls of one
   // session run one at a time, in arrival order, so sensing and draining do not interleave.
@@ -397,8 +467,8 @@ function registerHooks(ctx, config) {
 
   ctx.on('agent/disposed', ({ agent }) => {
     const sid = sidOf(agent)
-    for (const m of [lastText, queues]) m.delete(sid)
-    for (const s of [compacted, continuing]) s.delete(sid)
+    for (const m of [lastText, queues, pendingPrompt]) m.delete(sid)
+    for (const s of [compacted, continuing, looked, nudged, booted]) s.delete(sid)
   })
 
   ctx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
@@ -412,10 +482,22 @@ function registerHooks(ctx, config) {
       // A message she typed starts a new user turn; our Stop continuation no longer applies.
       continuing.delete(sid)
       const prompt = typed.map((m) => contentText(m.content)).filter(Boolean).join('\n')
+      // A new turn resets "did she look anything up": the nudge is per turn, not per session.
+      pendingPrompt.set(sid, prompt)
+      looked.delete(sid)
+      nudged.delete(sid)
       const reset = compacted.delete(sid)
       res = await inOrder(sid, () =>
         callGateway('UserPromptSubmit', { session_id: sid, prompt, ...(reset ? { reset: true } : {}) }, signal),
       )
+      // The gateway's own SessionStart banner is just "Horon is ready"; the boot nodes only come
+      // from `login`. On the first turn of a session, pull them in so the model does not have to
+      // remember to run it — the policy says to, but a rule nobody enforces is not a rule.
+      if (!booted.has(sid) && !isChild(agent)) {
+        booted.add(sid)
+        const boot = await inOrder(sid, () => runBoot(sid, signal))
+        if (boot) res = { ...(res ?? {}), context: [res?.context, boot].filter(Boolean).join('\n\n') }
+      }
     } else if (compacted.delete(sid)) {
       res = await inOrder(sid, () => callGateway('SessionStart', { session_id: sid, source: 'compact' }, signal))
     }
@@ -430,6 +512,12 @@ function registerHooks(ctx, config) {
   ctx.on('tools/pre-execute', async (exec, next) => {
     const sid = sidOf(exec?.agent)
     if (sid) {
+      // Mark the turn as "looked something up" before the call runs, so a failed search still
+      // counts: the model did consult memory, the nudge has nothing to add.
+      if (exec.name === 'horon' && Array.isArray(exec.arguments?.args)) {
+        const cmd = exec.arguments.args[0]
+        if (RETRIEVAL_COMMANDS.has(cmd)) looked.add(sid)
+      }
       const reset = compacted.delete(sid)
       const failedBefore = stats.failed ?? 0
       const res = await inOrder(sid, () =>
@@ -467,10 +555,44 @@ function registerHooks(ctx, config) {
 
   ctx.on('agent/turn-stopping', async ({ agent, signal }) => {
     const sid = sidOf(agent)
-    if (!sid || signal?.aborted) return
+    if (!sid) return
+    // The user pressed stop: this turn is over, so turn-scoped sensors must go dark. Without this
+    // they stay lit until the next prompt and the next turn starts with dirty state.
+    if (signal?.aborted) {
+      pendingPrompt.delete(sid)
+      looked.delete(sid)
+      nudged.delete(sid)
+      await inOrder(sid, () => callGateway('Interrupt', { session_id: sid }))
+      return
+    }
     const wasContinuing = continuing.delete(sid)
     const last = lastText.get(sid) ?? ''
     lastText.delete(sid)
+
+    // Nudge once per turn: the prompt asked for something the memory may already know, and nothing
+    // was looked up. Cheaper than a wrong answer, and the model can still say "nothing there".
+    const prompt = pendingPrompt.get(sid) ?? ''
+    if (!looked.has(sid) && !nudged.has(sid) && !isChild(agent) && prompt && RECALL_SIGNAL.test(prompt)) {
+      nudged.add(sid)
+      continuing.add(sid)
+      try {
+        agent.steer(
+          bannerMessage(
+            [
+              '这一轮没有查过记忆，但问题像是记忆里可能已经有答案。',
+              '先查一次再收尾：知道确切词用 ["search_keyword", "<词>"]，只有场景用 ["search_semantic", "<大白话>"]；',
+              '查到就 read_concept 取正文并据此修正答案，确实没有就说明「记忆里没有」，然后正常结束。',
+            ].join('\n'),
+            'Horon Harness · 先查再答',
+          ),
+        )
+      } catch (e) {
+        continuing.delete(sid)
+        log(`recall nudge failed: ${e}`)
+      }
+      return
+    }
+
     const res = await inOrder(sid, () =>
       callGateway('Stop', {
         session_id: sid,
