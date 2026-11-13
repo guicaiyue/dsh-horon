@@ -75,7 +75,7 @@ dsh plugin add dsh-horon        # 或在 Web 插件市场里点安装
 
 - 插件这一侧（`harness.js` 的 `tools/pre-execute`）只做一件事：把每次工具调用的名字和参数交给 Horon 的 `PreToolUse`，Horon 回 `deny` 才拦。
 - 拦不拦由**数据库**决定：`tool_guards` 表里的规则（`tool` 正则 + `args_pattern` + `adapter`）指向一个 `guard` 概念，guard 的输入电路通电才放行，未通电或被抑制就拦。这些行是使用者在自己的库里一条条 `set <guard> tool_guard ...` 建出来的，**不在代码里、也不随包发布**。
-- 同类还有两件也不随包走：个人 tag 插件（写时门禁，如「记忆入库」）放在 `tagPluginsDir`，组装器（`scripts/assemble.mjs`）的白名单只带 `state.py / action.py / result.py / exit.py` 四个系统插件；任何 `*.db` 也不进 git、不进镜像、不进构建物。
+- 同类还有一件也不随包走：任何 `*.db` 都不进 git、不进镜像、不进构建物。tag 插件分两类——包自带的默认插件（`tag_plugins/记忆入库.py`，由 `seed.js` 在首启复制并注册）随 npm 包走；用户自己写的放在 `tagPluginsDir` 里，组装器（`scripts/assemble.mjs`）只从 Horon 仓库带 `state.py / action.py / result.py / exit.py` 四个系统插件。
 - 所以别人装完的默认状态是：hooks 开着，每次工具调用都问一次 Horon，库里没有规则 → `guard()` 直接放行，**零拦截**。工具名还是 dsh 的原样（`pwsh`、`edit`、`read`、`horon`），照着 Claude Code 写的规则在这里不匹配。
 
 **想让规则跟着走**，把库里的东西显式带过去（读 `horon-circuit` / `horon-plugin` 说明书）：
@@ -86,7 +86,7 @@ horon read_hook <guard 名或 ID>                            # 看它的 tool_gu
 horon set <guard 名> tool_guard 'pwsh' --args-pattern 'git\s+push'   # 在目标库里重建同一条规则
 ```
 
-电路之间的依赖（`AND` / `OR` / `CHAIN` / 抑制边）不会被一条 `tool_guard` 带过来，得按 `compile --target <guard>` 的依赖树逐个补；个人 tag 插件放在 `<dataDir>/tag_plugins`，两种运行方式共用一个目录，不需要往构建物里手工拷（`artifact` 模式每次启动会自动镜像进去）。
+电路之间的依赖（`AND` / `OR` / `CHAIN` / 抑制边）不会被一条 `tool_guard` 带过来，得按 `compile --target <guard>` 的依赖树逐个补；tag 插件放在 `<dataDir>/tag_plugins`，两种运行方式共用一个目录，不需要往构建物里手工拷（`artifact` 模式每次启动会自动镜像进去）。包还自带一枚默认插件 `记忆入库`：首次启动时 `seed.js` 把它复制进 `<dataDir>/tag_plugins/`（已有则不覆盖）并在库里注册这个 Tag，所以新装的库不是一张裸图。
 
 **怎么当场确认它在不在跑**：设置页「Horon 服务」那行现在多一个「拦截链」读数——`已挂载 · 本次共拒绝 N · 网关失败 M`，鼠标悬停看说明；`/dsh-horon/_dsh/status` 的 `hooks` 字段是同一份数据。
 
@@ -101,6 +101,48 @@ horon set <guard 名> tool_guard 'pwsh' --args-pattern 'git\s+push'   # 在目�
 用户按停止键时插件会给 Horon 发 `Interrupt`，熄掉本会话 turn 级传感器，避免下一轮带着上一轮的脏状态开始。
 
 拦截链是 **fail-open** 的：Horon 服务不可达时插件不会卡住工具（否则一次服务崩溃就把 dsh 锁死），但会把这次会话标记为降级，在会话里播一条「拦截链未生效」的 banner 并计入上面的「网关失败」，不让「没拦」被误读成「规则放行」。
+
+## 在 autoloop / headless 里用
+
+agent-autoloop 这类编排器不用 Web UI，它拉起的每一轮都是 `dsh --profile headless "任务"`。这个模式
+**不挂 web server、connection 和 skills 服务**，所以控制台面板没有；但 `horon` 工具、记忆策略那段
+system-prompt、以及全部生命周期钩子都照常挂载——记忆照读照写，门禁照拦。
+
+装上（一次）：
+
+```bash
+dsh plugin --profile headless add dsh-horon
+```
+
+再往 `~/.dsh/profiles/headless/cordis.patch.yml` 末尾加一条，让它连到同一个库：
+
+```yaml
+- insert:
+    - id: dsh-horon
+      name: 'dsh-horon'
+      config:
+        mode: docker            # 或 artifact / url
+        autostart: true
+        hooks: true
+        dataDir: '/home/you/.horon'
+```
+
+自测（跑完应当能看见它调 `horon` 工具，并且违反门禁时被拦）：
+
+```bash
+dsh --profile headless --permission-mode workspace-write --approval-policy never \
+  "用 horon 工具跑一次 login，一句话说明看到几个启动节点。"
+```
+
+两个只在 headless 下会遇到的坑：
+
+- **`--permission-mode` 的点名必须是这个 profile 真有的 preset**。编排器常把权限档位写成
+  `read` / `edit` / `full`，而 headless 补丁里配的是 `read-only`、`read-only-never`、
+  `workspace-write`、`workspace-write-never`、`danger-full-access`；写错会直接
+  `permission: unknown preset "edit"`，插件根本没机会加载。
+- **每一轮都是新进程**。会话号由编排器用 `--session-id` 续，插件按同一个会话号跟 Horon 说话，
+  所以 turn 级传感器会随轮次正常复位；但如果编排器每轮换新会话号，`turn` 级的前置条件就攒不起来
+  （像「本回合先用 pgrep」这类门禁前置会一直是断电状态）。
 
 ### 从 horon-web 迁移
 
@@ -161,7 +203,7 @@ node test/host-smoke.mjs && node test/artifact-smoke.mjs      # 只跑纯函数�
 | `<dataDir>/horon.db` | SQLite 库；docker 模式下整个 `<dataDir>` 挂到容器 `/data`，所以两边是同一个文件 |
 | `<dataDir>/.env` | API key / 代理。旧布局的 `<dataDir>/docker/.env` 在没有新文件时仍会被读取 |
 | `<dataDir>/runtime/<commit8>-<platform>/` | 构建物解包目录，换版本解包到新目录，旧的可回滚 |
-| `<dataDir>/tag_plugins/` | 个人 tag 插件；artifact 模式每次启动镜像进构建物的 `app/backend/tag_plugins`，docker 模式直接挂载 |
+| `<dataDir>/tag_plugins/` | tag 插件；artifact 模式每次启动镜像进构建物的 `app/backend/tag_plugins`，docker 模式直接挂载。包自带的 `记忆入库` 由 `seed.js` 首启复制进来，用户自己的插件也放这里 |
 
 开发/接入已有服务时才用：`root`（`~/horon`）、`python`、`url`、`host` / `port`（`127.0.0.1:8710`）。
 
