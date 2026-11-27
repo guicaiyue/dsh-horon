@@ -231,8 +231,10 @@ function contentText(content) {
 // Retrieval commands: any of these means the model actually looked something up this turn.
 const RETRIEVAL_COMMANDS = new Set(['search_keyword', 'search_semantic', 'read_concept', 'recent', 'read_hook'])
 
-// Above this, a read_concept result is worth a note: the useful part is rarely the whole node.
-const LONG_NODE_BYTES = 4096
+// Above this, a read_concept result is worth a note. Same line Horon itself uses
+// (backend/content_scope_audit.py OVERSIZE_BYTES): below it the CLI says nothing, so a plugin
+// threshold of its own would either nag earlier than the library or disagree with it.
+const LONG_NODE_BYTES = 8192
 
 // A prompt that reads like "recall something" rather than "do something". Used only to decide
 // whether to nudge once at Stop, so keep it narrow: a false positive costs one extra step.
@@ -251,17 +253,17 @@ const MEMORY_POLICY = [
   '- 用户纠偏（「不对」「不是这样」「你又忘了」）或话题漂移，说明手上的上下文可能缺前提。',
   '- 要回答「本机/这台机器上 X 是怎么配的」这类事实问题。',
   '怎么查：知道确切词（命令名、包名、路径、端口）用 `["search_keyword", "词"]`；说不出名字、只有场景，用 `["search_semantic", "大白话描述场景"]`。',
-  '两个命令的分工不能混：`search_keyword` 是整串子串匹配、搜名字+别名+书腰+正文，所以查单词可靠、查一句话会落空；',
+  '两个命令的分工不能混：`search_keyword` 按空格分词、每个词都要在名字+别名+书腰+正文里出现（2026-11-15 起，词可分散在不同字段），所以查一个词最可靠，多个词是 AND；',
   '`search_semantic` 只对书腰（when_to_read）建向量，所以它匹配的是「什么情况下该打开」，不是正文里的术语。',
   '查完再 `read_concept <id>` 取正文。查不到就明说查不到，不要编。',
   '',
   '【怎么写】',
   '- 一个节点只装一个可复用的概念：能改变下次做法的判断、状态、事实及其依据；不要把整段对话、工具输出或会话日志塞进节点。',
-  '- 原始观察只作为 bullet 追加到对应情境节点的「原始记录」；「当前判断」只在自省时改写，被批评的当场不写解释。',
+  '- 原始观察只作为 bullet 追加到对应情境节点的「原始记录」；「当前判断」只在自省时改写，被批评的当场不写解释；自省时，新判断已概括的旧记录可以合并成一行（写清时间范围、次数、结果），跟新判断不符的保留原样。',
   '- 同一概念只用一个规范节点，新建时写清 when_to_read（什么情况下需要打开它），相关观察汇入正文；需要共同检索或维护时再建 Tag。',
   '- 写入前先 list_tags：有写时门禁 Tag（如「记忆入库」）时，新建节点后立刻挂上；被拒就按提示改正文再挂。',
   '- 下次那个时刻不会主动想起来查笔记的做法，做成 sensor/logic/guard 电路，而不是只写 plain。',
-  '- 第一次写入前先读 horon-cli 说明书；会话开始时先运行 login 并读完输出。',
+  '- 第一次写入前先读 horon-cli 说明书；会话开始时先运行 login，手册整篇读完（别用 head/tail 或字节上限截断——后面几节才决定你怎么工作）。',
   '',
   '【写电路时的 dsh 键名】规则里的工具名和参数按 dsh 原样匹配，不是 Claude Code 的：',
   '- 工具名：shell 是 `pwsh` 或 `bash`（跨宿主写成 `pwsh|bash`），读文件 `read`，改文件 `edit`，搜索 `grep`/`glob`。',
@@ -307,9 +309,10 @@ function registerTool(ctx, config) {
       `Run the Horon CLI: python frontend/cli.py <args>, ${where}` +
       `Pass each CLI argument as one array item; no shell quoting is applied. ` +
       `Horon is a concept graph for reusable judgments and state, not a store for chat transcripts. ` +
-      `Two search commands, not interchangeable: ["search_keyword", "<word>"] is a whole-string ` +
-      `substring match over name/alias/when_to_read/content (reliable for a single term, misses a ` +
-      `sentence); ["search_semantic", "<plain-language scene>"] matches only the when_to_read blurb by ` +
+      `Two search commands, not interchangeable: ["search_keyword", "<word> <word>"] splits the query ` +
+      `on spaces and every word must appear somewhere in name/alias/when_to_read/content (terms may ` +
+      `land in different fields; a single word is the most reliable query); ` +
+      `["search_semantic", "<plain-language scene>"] matches only the when_to_read blurb by ` +
       `vector (finds "when should I open this", not terms inside the body). Then ["read_concept", "<id>"]. ` +
       `Read the manual before first use: ${manual}`,
     parameters: {
@@ -344,14 +347,15 @@ function registerTool(ctx, config) {
       const text = out + err
       if (code !== 0) throw new Error(`horon exited with code ${code}\n${text}`)
       // A long node costs a lot of context to read and usually buries today's answer under days of
-      // history. Say so where the read happens; `audit` only reports above 8 KB, which is late.
+      // history. Horon prints its own note above the same line; this one says what to do about it,
+      // in the words the manual uses (split two things, or read it all and cut what is dead).
       const bytes = Buffer.byteLength(text, 'utf8')
       if (args.args[0] === 'read_concept' && bytes > LONG_NODE_BYTES) {
         return (
           text +
-          `\n\n【Horon】这次读了 ${bytes} 字节（约 ${Math.round(bytes / 3)} 个汉字）。` +
-          '节点超过 4 KB 通常说明它装了多天历史：真正需要的那两句常在最前面或最后一条记录里。' +
-          '若它反复被读，考虑拆出「当前状态」段（只写今天有效的地址/版本/命令），历史留在下面。'
+          `\n\n【Horon】这次读了 ${bytes} 字节（约 ${Math.round(bytes / 3)} 个汉字），已过 8 KB 的膨胀线。` +
+          '整理记忆是你自己的事：装了两件事就拆成两个节点；只有一件事就读完全部内容，' +
+          '决定要不要改变观点和做法，再删掉重复和不再有用的内容。'
         )
       }
       return text

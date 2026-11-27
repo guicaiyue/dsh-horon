@@ -95,13 +95,18 @@ git -C ~/horon fetch && git -C ~/horon log --oneline -5
 node scripts/assemble.mjs --repo ~/horon --out .build/artifact --platform win-x64 --wheels --build-web
 node test/host-smoke.mjs
 #   只想验证前端复制/目录布局时可以跳过 npm：--web-dist <已构建的 dist 目录>
-# 4. 推 main：image 与 release 两个工作流分别出镜像与构建物
-# 5. 把 release 汇总的 sha256 填回 horon.lock.json 的 artifact.sha256
-# 6. 打标签发 npm：git tag v1.0.1 && git push origin v1.0.1
+# 4. 改版本号（有新功能走 minor），再 node scripts/market-entry.mjs 重生成市场条目
+# 5. 推 main：image 与 release 两个工作流分别出镜像与构建物
+# 6. 打标签发 npm：git tag v1.5.0 && git push origin v1.5.0
 ```
 
-`docker/requirements.lock.txt` 是照上游 `.venv` 抄的固定版本；换 commit 时要重生成，
-`image.yml` 的冒烟会替你把「装不上/起不来」挡在发布之前。
+**sha256 不用手填**：`release.yml` 的 `record digests in the lock file` 跑 `lock-sync.mjs digests`，
+有变化就自己 `git commit -m "chore(lock): record artifact digests [skip ci]"` 推回 main；
+`image.yml` 同款记镜像名。两个 workflow 的 build job 都带
+`if: !startsWith(head_commit.message, 'chore(lock)')`，回写的那次不会再触发一轮。
+
+`docker/requirements.lock.txt` 直接用上游仓库根目录那份（uv compile、universal、py3.12）；
+换 commit 时重下一份，`image.yml` 的冒烟会替你把「装不上/起不来」挡在发布之前。
 
 ## 上架市场
 

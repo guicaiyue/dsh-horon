@@ -28,6 +28,9 @@ window.__ModuleLoader__.load({
     const PROBE_URL = `${CONSOLE_URL}api/sessions`
     // The Host half's settings endpoints (API_PREFIX in index.js).
     const API_BASE = '/dsh-horon/_dsh'
+    // Sensor / guard hit statistics come from the service (backend/hook_hits.py), not from the
+    // Host half: the numbers live in the same database the rules do.
+    const HOOKS_URL = `${CONSOLE_URL}api/hooks`
 
     const zh = {
       nav: 'Horon 记忆',
@@ -105,6 +108,19 @@ window.__ModuleLoader__.load({
       guardHint: '拦截链只负责问 Horon；真正拦不拦，取决于库里的 guard 电路与 tool_guards 规则。新装的库是空的，所以「拒绝 0 次」通常表示没有规则，而不是规则放行。',
       guardFailedHint: '网关失败：这次插件挂载以来，有多少次请求没送到 Horon（连不上、超时或返回错误）。这些调用因为 fail-open 没有被检查，最常见的原因是 Horon 服务正在重启。',
       guardLastError: '最近一次',
+
+      // sensor / guard hit statistics (from the service's /api/hooks)
+      hooksTitle: '规则命中',
+      hooksHint: '库里每条 sensor_hook 与 tool_guard 最近 {days} 天匹配、点火、拦截的次数。数字由 Horon 记在审计日志里，和 read_hook 打印的是同一份。刚升级或刚建的规则会是 0，要攒几天才有意义。',
+      hooksLoading: '正在读取规则命中…',
+      hooksEmpty: '库里还没有传感器或守卫规则。',
+      hooksUnavailable: '读不到命中统计：{reason}',
+      hooksQuiet: '久未点火或从未点火',
+      hooksRuleSensor: '传感器',
+      hooksRuleGuard: '守卫',
+      hooksColumnRule: '规则',
+      hooksColumnWhere: '监听',
+      hooksColumnSummary: '近况',
     }
 
     const en = {
@@ -182,6 +198,19 @@ window.__ModuleLoader__.load({
       guardHint: 'The chain only asks Horon; whether a call is blocked depends on the guard circuits and tool_guards rules in the database. A fresh database has none, so "denied 0" usually means no rules, not rules that passed.',
       guardFailedHint: 'Gateway failures: requests that never reached Horon since this plugin mounted (connection refused, timeout, or an error response). Those calls go unchecked because the chain is fail-open; a service restart is the usual cause.',
       guardLastError: 'last',
+
+      // sensor / guard hit statistics (from the service's /api/hooks)
+      hooksTitle: 'Rule hits',
+      hooksHint: 'How often each sensor_hook and tool_guard matched, fired and blocked over the last {days} days. Horon records these in its audit log; read_hook prints the same numbers. A freshly upgraded database or a new rule reads 0 until some days pass.',
+      hooksLoading: 'Reading rule hits…',
+      hooksEmpty: 'No sensor or guard rules in the database yet.',
+      hooksUnavailable: 'Rule hits unavailable: {reason}',
+      hooksQuiet: 'Quiet or never fired',
+      hooksRuleSensor: 'sensor',
+      hooksRuleGuard: 'guard',
+      hooksColumnRule: 'Rule',
+      hooksColumnWhere: 'Listens to',
+      hooksColumnSummary: 'Recent',
     }
 
     /** Calls the Host half and returns the parsed payload. */
@@ -414,6 +443,13 @@ window.__ModuleLoader__.load({
 .dshhw-hint{font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.45;word-break:break-all;}
 .dshhw-note{font-size:12px;color:var(--dsw-alias-label-secondary);line-height:1.5;}
 .dshhw-error{font-size:12px;color:var(--dsw-alias-state-error-primary);line-height:1.5;white-space:pre-wrap;}
+.dshhw-hooks{display:flex;flex-direction:column;gap:6px;}
+.dshhw-hook{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;}
+.dshhw-hook-name{font-size:12px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dshhw-hook-kind{font-size:11px;color:var(--dsw-alias-label-tertiary);}
+.dshhw-hook-where{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--dsw-alias-label-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.dshhw-hook-sum{grid-column:1/-1;font-size:11px;color:var(--dsw-alias-label-secondary);line-height:1.45;}
+.dshhw-hook.quiet{border-color:var(--dsw-alias-state-warn-primary);}
 /* state 色在浅色主题里当正文太浅（amber-500 / green-500 落在近白底上只有 2.1:1），
    所以状态只交给圆点，正文用 label-primary，深浅两套主题都读得清。 */
 .dshhw-ok,.dshhw-warn{display:flex;gap:6px;align-items:flex-start;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary);}
@@ -488,6 +524,7 @@ window.__ModuleLoader__.load({
       const [jobKind, setJobKind] = React.useState('deploy')
       const [copyRequest, setCopyRequest] = React.useState(undefined)
       const [copyNote, setCopyNote] = React.useState(undefined)
+      const [hookStats, setHookStats] = React.useState(undefined)
 
       const since = React.useRef(0)
       const clip = React.useRef(null)
@@ -523,6 +560,28 @@ window.__ModuleLoader__.load({
         }
         tick()
         const timer = setInterval(tick, 5000)
+        return () => {
+          cancelled = true
+          clearInterval(timer)
+        }
+      }, [])
+
+      // Rule hit statistics: they change only when a rule fires, so a slow poll is enough. A
+      // failure is not an error state — an older service has no /api/hooks at all.
+      React.useEffect(() => {
+        let cancelled = false
+        const tick = () => {
+          fetch(HOOKS_URL, { cache: 'no-store' })
+            .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`HTTP ${String(response.status)}`))))
+            .then((payload) => {
+              if (!cancelled) setHookStats(payload)
+            })
+            .catch((caught) => {
+              if (!cancelled) setHookStats({ rules: [], reason: caught.message })
+            })
+        }
+        tick()
+        const timer = setInterval(tick, 15000)
         return () => {
           cancelled = true
           clearInterval(timer)
@@ -782,7 +841,7 @@ ${t('guardFailedHint')}` : t('guardHint'),
           h(
             'div',
             { className: 'dshhw-hint' },
-            `${t('applied')}: ${resolved.dbFile ?? ''} · ${resolved.envFile ?? ''} · ${resolved.base ?? ''}`,
+            `${t('applied')}: ${resolved.dbFile ?? ''} · ${resolved.envFile ?? ''} · ${data?.localDir ?? ''} · ${resolved.base ?? ''}`,
           ),
           h('div', { className: 'dshhw-note' }, t('saveNote')),
           h(
@@ -862,6 +921,60 @@ ${t('guardFailedHint')}` : t('guardHint'),
             tabIndex: -1,
             'aria-hidden': true,
           }),
+        ),
+
+        // Sensor / guard hit statistics. The numbers live in the Horon database, so they come from
+        // the service (its /api/hooks), not from the Host half: a service that predates hook_hits
+        // answers with a reason instead, and that reason is shown rather than hidden.
+        h(
+          'div',
+          { className: 'dshhw-section' },
+          h(
+            'div',
+            { className: 'dshhw-row' },
+            h('h4', null, t('hooksTitle')),
+            h('span', { className: 'dshhw-spacer' }),
+            hookStats?.windowDays > 0
+              ? h('span', { className: 'dshhw-note' }, `${String(hookStats.windowDays)}d`)
+              : null,
+          ),
+          h('div', { className: 'dshhw-note' }, t('hooksHint', { days: hookStats?.windowDays || 7 })),
+          hookStats === undefined
+            ? h('div', { className: 'dshhw-note' }, t('hooksLoading'))
+            : hookStats.reason !== undefined
+              ? h('div', { className: 'dshhw-note' }, t('hooksUnavailable', { reason: hookStats.reason }))
+              : hookStats.rules.length === 0
+                ? h('div', { className: 'dshhw-note' }, t('hooksEmpty'))
+                : h(
+                    'div',
+                    { className: 'dshhw-hooks' },
+                    ...hookStats.rules.map((rule) =>
+                      h(
+                        'div',
+                        {
+                          key: `${rule.kind}-${String(rule.id)}`,
+                          className: (hookStats.quietIds ?? []).includes(rule.id) ? 'dshhw-hook quiet' : 'dshhw-hook',
+                        },
+                        h('span', { className: 'dshhw-hook-name', title: rule.name }, `#${String(rule.id)} ${rule.name}`),
+                        h(
+                          'span',
+                          { className: 'dshhw-hook-kind' },
+                          `${rule.kind === 'tool_guard' ? t('hooksRuleGuard') : t('hooksRuleSensor')}${
+                            rule.adapter ? ` · ${rule.adapter}` : ''
+                          }`,
+                        ),
+                        h(
+                          'span',
+                          { className: 'dshhw-hook-where' },
+                          [rule.event, rule.tool].filter(Boolean).join(' · ') || '—',
+                        ),
+                        h('span', { className: 'dshhw-hook-sum' }, rule.summary),
+                      ),
+                    ),
+                  ),
+          hookStats?.quiet
+            ? h('div', { className: 'dshhw-note' }, `${t('hooksQuiet')}: ${hookStats.quiet.split('\n')[0]}`)
+            : null,
         ),
 
         // Deploy log

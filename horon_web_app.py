@@ -23,7 +23,7 @@ import os
 import re
 import subprocess
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -113,6 +113,59 @@ async def run_hook(event: str, request: Request) -> dict:
     payload = (await request.body()).decode("utf-8", errors="replace")
     argv = [sys.executable, str(GATEWAY), event, "--adapter", "dsh"]
     return await run_in_threadpool(_run, argv, payload, _child_env(), HOOK_TIMEOUT_S)
+
+
+def _hook_rules(db_path: Path) -> dict:
+    """每条 sensor_hook / tool_guard 的近况：命中次数、点火次数、最后一次时间。
+
+    read_hook 在 CLI 里逐条打印这些数字，但要在终端里翻；面板要的是一张表。
+    数字来自 backend/hook_hits.py 记在 cli_audit_log 的行，口径与 read_hook 完全一致。
+    连接在这个函数里开：sqlite3 的连接不能跨线程用，而它整个跑在线程池里。
+    """
+    import sqlite3
+
+    from backend.hook_hits import HIT_WINDOW_DAYS, hit_summary, quiet_sensor_report
+
+    with closing(sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = []
+        for r in conn.execute(
+            "SELECT c.id, c.name, h.event_type, h.tool, h.adapter, h.created_at, h.jev_question "
+            "FROM sensor_hooks h JOIN concepts c ON c.id = h.sensor_concept_id ORDER BY c.id"):
+            kind = 'sensor_jev' if r["jev_question"] else 'sensor'
+            rows.append({
+                'id': r["id"], 'name': r["name"], 'kind': 'sensor_hook', 'event': r["event_type"],
+                'tool': r["tool"], 'adapter': r["adapter"], 'setAt': r["created_at"],
+                'summary': hit_summary(conn, r["id"], r["created_at"], kind),
+            })
+        for r in conn.execute(
+            "SELECT c.id, c.name, g.tool, g.adapter, g.created_at "
+            "FROM tool_guards g JOIN concepts c ON c.id = g.guard_concept_id ORDER BY c.id"):
+            rows.append({
+                'id': r["id"], 'name': r["name"], 'kind': 'tool_guard', 'event': None,
+                'tool': r["tool"], 'adapter': r["adapter"], 'setAt': r["created_at"],
+                'summary': hit_summary(conn, r["id"], r["created_at"], 'tool_guard'),
+            })
+        quiet = quiet_sensor_report(conn)
+        return {
+            'windowDays': HIT_WINDOW_DAYS,
+            'rules': rows,
+            # 设下满 N 天一次没点火、或以前点过火但很久没再点的传感器；守卫不在里面（见 hook_hits 的说明）。
+            'quiet': quiet,
+            # 同一份报告里的节点 id，供界面标黄；报告本身是给人读的，别让前端去解析文字。
+            'quietIds': [int(m) for m in re.findall(r"\[(\d+)\]", quiet or "")],
+        }
+
+
+@app.get("/api/hooks")
+async def get_hooks() -> dict:
+    """传感器与守卫的命中统计，给 dsh 面板用；没有库或没升级到带 hook_hits 的版本时给空表。"""
+    if _db_path is None or not _db_path.exists():
+        return {'windowDays': 0, 'rules': [], 'quiet': None, 'reason': 'no database yet'}
+    try:
+        return await run_in_threadpool(_hook_rules, _db_path)
+    except Exception as e:  # 旧版本没有 hook_hits 模块、或表结构不同：面板显示原因，不报 500
+        return {'windowDays': 0, 'rules': [], 'quiet': None, 'reason': str(e)}
 
 
 if DIST.is_dir():

@@ -61,7 +61,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { artifactSettings, artifactStatus, provisionArtifact } from './artifact.js'
-import { defaultDataDir, proxyOf, resolveDataDir, tagPluginsDirFor } from './paths.js'
+import { defaultDataDir, localDirFor, proxyOf, resolveDataDir, tagPluginsDirFor } from './paths.js'
 import {
   deployState,
   dockerSettings,
@@ -146,6 +146,11 @@ function settings(config) {
     root,
     dataDir,
     tagPluginsDir,
+    // Where Horon keeps state that must outlive the code: the remote-mode rules database and the
+    // audit rows the hooks have not sent yet (backend/remote_client.py reads HORON_LOCAL_DIR).
+    // Under dataDir for the same reason the database is: artifact releases are unpacked per
+    // commit, so the default `<root>/.horon-local` moves (and is lost) on every upgrade.
+    localDir: localDirFor(dataDir),
     // The venv next to the root when it exists, so a fresh clone needs no `python` either.
     python: text(c.python) ?? defaultPython(root),
     host,
@@ -497,6 +502,9 @@ async function describeConfig(ctx, config) {
     defaultDataDir: defaultDataDir(),
     defaultProxy: proxyOf({}),
     resolved: describeResolved(s.docker),
+    // Where this mode keeps state that must outlive the code (remote rules database, unsent audit
+    // rows). Shown because artifact mode unpacks per commit, so the default location moves.
+    localDir: s.localDir,
     artifact: describeArtifact(s.artifact),
     artifactState: await artifactStatus(s.artifact),
     texts: await renderTexts(s.docker),
@@ -702,7 +710,7 @@ function registerSkills(ctx, root) {
 
 // ---- service lifecycle (spawn mode) ----------------------------------------------------------
 
-function runService(ctx, { root, python, host, port, autostart, base, prepare }) {
+function runService(ctx, { root, python, host, port, autostart, base, prepare, localDir }) {
   ctx.effect(() => {
     let child = null
     let stopped = false
@@ -772,6 +780,9 @@ function runService(ctx, { root, python, host, port, autostart, base, prepare })
           .filter(Boolean)
           .join(path.delimiter),
         HORON_ROOT: serviceRoot,
+        // Keeps the remote rules database and unsent audit rows next to the database instead of
+        // inside the code tree, which artifact mode replaces on every commit bump.
+        HORON_LOCAL_DIR: localDir,
       }
 
       let spawned

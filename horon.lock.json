@@ -11,11 +11,11 @@
   "horon": {
     "repo": "https://github.com/Dataojitori/horon.git",
     "branch": "master",
-    "commit": "1c62240bbf6cd9de95f2664a460797d46f2f71ce"
+    "commit": "b0989145a0cd4d13ed8dc1cfff80d7424ed4b9db"
   },
   "image": {
     "name": "xirizhi/horon-service",
-    "tag": "1.0.0",
+    "tag": "1.1.0",
     "digest": ""
   },
   "artifact": {

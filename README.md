@@ -4,6 +4,8 @@
 
 > 本仓库原名 `horon-web`（包名 `@local/horon-web`），2026-11-06 改名为 `dsh-horon`。改名只改插件的标识、路由和包名；`horon` 工具名与 `horon-cli` / `horon-circuit` / `horon-plugin` 三个 skill 保持不变，已有记忆里的调用方式不受影响。
 
+> **与上游自带的 `horon-harness` 插件的关系**：上游那个是宿主适配层（自带 uv 管 Python、无控制台），本仓库是带运行时的发行版（构建物/镜像 + 控制台）。两者都注册 `horon` 工具，**不要同时装**。逐项对比与选型判据见 [docs/vs-horon-harness.md](docs/vs-horon-harness.md)。
+
 ## 它做了什么
 
 一行 loader 配置（`dsh-horon`）挂四件事：
@@ -96,7 +98,7 @@ horon set <guard 名> tool_guard 'pwsh' --args-pattern 'git\s+push'   # 在目�
 
 1. **会话第一次进消息时自动跑一次 `login`**，把 boot 节点与最近改动作为上下文注入（网关自己的 `SessionStart` banner 只有一句 "Horon is ready"，不含 boot 节点）。
 2. **Stop 时补查一次**：这一轮问了像「本机 X 是怎么配的」「上次那个」这类问题、却一次检索命令都没调用，就 steer 一句让它先查再收尾。每轮最多一次。
-3. **`read_concept` 超过 4 KB 时附一句提醒**：节点偏大通常装了多天历史，建议拆出「当前状态」段。`audit` 的阈值是 8 KB，报得太晚。
+3. **`read_concept` 超过 8 KB 时附一句提醒**：与 Horon 自己的 `OVERSIZE_BYTES` 同线，文案也用它那套口径（装了两件事就拆，只有一件事就读完再删）。阈值自己定会跟库的提示打架。
 
 用户按停止键时插件会给 Horon 发 `Interrupt`，熄掉本会话 turn 级传感器，避免下一轮带着上一轮的脏状态开始。
 
