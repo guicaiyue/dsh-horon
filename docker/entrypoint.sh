@@ -13,4 +13,12 @@ for f in /opt/horon-seed/tag_plugins/*.py; do
   [ -e "$dest" ] || cp "$f" "$dest"
 done
 
+# Two fixes to the model calls, applied at every start so they survive image pulls:
+#  - `openai/gpt-6-luna` (NAMER_MODEL) answers 403 "not available in your region" from some
+#    networks, so `suggest_name` and the name check inside `audit --concept` always failed.
+#    deepseek/deepseek-v3.2 is reachable under the zero-retention policy.
+#  - The chat call sent no max_tokens, so OpenRouter reserved room for the model's whole output
+#    window and refused with HTTP 402 once the account could not cover it. A name is a few words.
+python3 /usr/local/bin/horon-patch-llm >/dev/null 2>&1 || true
+
 exec "$@"

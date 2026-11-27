@@ -52,7 +52,7 @@
 //   container      container name, default horon
 //   buildProxy     legacy: images used to be built here. Ignored; kept so old profiles still load.
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import http from 'node:http'
@@ -97,7 +97,17 @@ const MAX_BODY_BYTES = 512 * 1024
 // Keys the settings page may write into the profile patch. Everything else is derived: the
 // database, the key file, the runtime directory and the container all follow `dataDir`, and the
 // container itself is fixed (loopback, 8710, the published image).
-const EDITABLE = new Set(['mode', 'proxy', 'dataDir', 'autostart', 'hooks', 'skills', 'url', 'port', 'python', 'root'])
+const EDITABLE = new Set([
+  'mode', 'proxy', 'dataDir', 'autostart', 'hooks', 'skills', 'url', 'port', 'python', 'root',
+  // Model routing. Kept out of the code so a deployment can point Horon at a local gateway
+  // without rebuilding the image, and so a broken primary has somewhere to fall back to.
+  'namerModel', 'jevModel', 'embeddingModel',
+  // Primary endpoints, so embeddings can run on a local Ollama (its /v1/embeddings speaks the
+  // same protocol as OpenRouter's) instead of the paid API.
+  'embeddingsEndpoint', 'decisionsEndpoint', 'chatEndpoint', 'localApiKey',
+  'namerFallbackBase', 'namerFallbackKey', 'namerFallbackModel',
+  'jevFallbackBase', 'jevFallbackKey', 'jevFallbackModel',
+])
 const MODES = new Set(['spawn', 'artifact', 'docker', 'url'])
 // BUNDLED_SKILL_RANK of @deepseek-ai/dsh-skill: user (~/.dsh/skills) and project skills win over it.
 const SKILL_RANK = 600
@@ -173,7 +183,56 @@ function settings(config) {
       existsSync(path.join(c.root ?? DEFAULT_ROOT, 'frontend', 'cli.py')),
     // Where this host reaches the service: the configured one, or the one it starts.
     base: mode === 'url' ? url : mode === 'docker' ? docker.base : `http://${urlHost(host)}:${port}`,
+    // Model routing, passed to the service as HORON_* variables. Empty means "leave upstream's
+    // constant alone", so an unconfigured install behaves exactly as before.
+    models: modelSettings(c),
   }
+}
+
+// Every HORON_* variable the service reads for model routing, in the order the page shows them.
+// The fallbacks are per endpoint and independent: a missing base or model disables that one.
+function modelSettings(c) {
+  const text = (value) => (typeof value === 'string' && value.trim() ? value.trim() : '')
+  return {
+    namerModel: text(c.namerModel),
+    jevModel: text(c.jevModel),
+    embeddingModel: text(c.embeddingModel),
+    embeddingsEndpoint: text(c.embeddingsEndpoint),
+    decisionsEndpoint: text(c.decisionsEndpoint),
+    chatEndpoint: text(c.chatEndpoint),
+    localApiKey: text(c.localApiKey),
+    namerFallback: {
+      base: text(c.namerFallbackBase),
+      key: text(c.namerFallbackKey),
+      model: text(c.namerFallbackModel),
+    },
+    jevFallback: {
+      base: text(c.jevFallbackBase),
+      key: text(c.jevFallbackKey),
+      model: text(c.jevFallbackModel),
+    },
+  }
+}
+
+// The service reads these; keeping the mapping in one place means the spawn env, the docker
+// env and the settings page cannot drift apart.
+function modelEnv(models) {
+  const env = {}
+  if (models.namerModel) env.HORON_NAMER_MODEL = models.namerModel
+  if (models.jevModel) env.HORON_JEV_MODEL = models.jevModel
+  if (models.embeddingModel) env.HORON_EMBEDDING_MODEL = models.embeddingModel
+  if (models.embeddingsEndpoint) env.HORON_EMBEDDINGS_ENDPOINT = models.embeddingsEndpoint
+  if (models.decisionsEndpoint) env.HORON_DECISIONS_ENDPOINT = models.decisionsEndpoint
+  if (models.chatEndpoint) env.HORON_CHAT_ENDPOINT = models.chatEndpoint
+  if (models.localApiKey) env.HORON_LOCAL_API_KEY = models.localApiKey
+  for (const [slot, prefix] of [['namerFallback', 'NAMER'], ['jevFallback', 'JEV']]) {
+    const f = models[slot]
+    if (!f || !f.base || !f.model) continue
+    env[`HORON_${prefix}_FALLBACK_BASE`] = f.base
+    env[`HORON_${prefix}_FALLBACK_MODEL`] = f.model
+    if (f.key) env[`HORON_${prefix}_FALLBACK_KEY`] = f.key
+  }
+  return env
 }
 
 async function isServing(base, timeoutMs = 1200) {
@@ -446,6 +505,19 @@ function readableConfig(config) {
     autostart: c.autostart !== false,
     dataDir: c.dataDir,
     proxy: c.proxy,
+    // Model routing comes back with the config so the page can show what is stored, not just
+    // what the environment happens to resolve to.
+    namerModel: c.namerModel,
+    jevModel: c.jevModel,
+    embeddingModel: c.embeddingModel,
+    embeddingsEndpoint: c.embeddingsEndpoint,
+    localApiKey: c.localApiKey,
+    namerFallbackBase: c.namerFallbackBase,
+    namerFallbackKey: c.namerFallbackKey,
+    namerFallbackModel: c.namerFallbackModel,
+    jevFallbackBase: c.jevFallbackBase,
+    jevFallbackKey: c.jevFallbackKey,
+    jevFallbackModel: c.jevFallbackModel,
   }
 }
 
@@ -505,6 +577,8 @@ async function describeConfig(ctx, config) {
     // Where this mode keeps state that must outlive the code (remote rules database, unsent audit
     // rows). Shown because artifact mode unpacks per commit, so the default location moves.
     localDir: s.localDir,
+    // What the service will actually use, so the page can show the defaults next to the fields.
+    models: s.models,
     artifact: describeArtifact(s.artifact),
     artifactState: await artifactStatus(s.artifact),
     texts: await renderTexts(s.docker),
@@ -710,7 +784,31 @@ function registerSkills(ctx, root) {
 
 // ---- service lifecycle (spawn mode) ----------------------------------------------------------
 
-function runService(ctx, { root, python, host, port, autostart, base, prepare, localDir }) {
+// Put the model-routing block into a Horon checkout the plugin runs itself (spawn and artifact).
+// Docker does the same thing from its entrypoint, so both runtimes end up with one implementation.
+// Failure is logged and ignored: a read-only or missing tree should not stop the service from
+// starting with upstream's constants.
+function applyModelPatch(s, log) {
+  const root = s.root
+  const target = root ? path.join(root, 'backend', 'llm.py') : undefined
+  if (!target || !existsSync(target)) return
+  const script = path.join(HERE, 'docker', 'patch-llm.py')
+  if (!existsSync(script)) return
+  try {
+    const done = spawnSync(process.env.HORON_PYTHON || 'python3', [script, target], {
+      encoding: 'utf8',
+      timeout: 20_000,
+      windowsHide: true,
+    })
+    const note = (done.stderr || '').trim()
+    if (note && !note.includes('already patched')) log(note)
+    if (done.status !== 0) log(`model routing patch did not apply: ${(done.stderr || '').trim() || `exit ${done.status}`}`)
+  } catch (error) {
+    log(`model routing patch skipped: ${error?.message ?? error}`)
+  }
+}
+
+function runService(ctx, { root, python, host, port, autostart, base, prepare, localDir, models }) {
   ctx.effect(() => {
     let child = null
     let stopped = false
@@ -783,6 +881,9 @@ function runService(ctx, { root, python, host, port, autostart, base, prepare, l
         // Keeps the remote rules database and unsent audit rows next to the database instead of
         // inside the code tree, which artifact mode replaces on every commit bump.
         HORON_LOCAL_DIR: localDir,
+        // Model routing from the settings page. Empty entries are absent, so upstream's
+        // constants stay in charge when nobody configured anything.
+        ...modelEnv(models ?? {}),
       }
 
       let spawned
@@ -838,6 +939,10 @@ export function apply(ctx, config) {
   if (s.skills) registerSkills(ctx, s.root)
   seedBundledTagPlugins(s, log)
 
+  // spawn / artifact run their own Python, so the model routing has to be patched into that
+  // checkout before the service starts; docker gets the same patch from its entrypoint.
+  if (s.mode !== 'docker' && s.mode !== 'url') applyModelPatch(s, log)
+
   if (s.mode === 'artifact') {
     runService(ctx, {
       ...s,
@@ -847,7 +952,8 @@ export function apply(ctx, config) {
     return
   }
   if (s.mode === 'docker') {
-    if (s.autostart) void ensureContainer(s.docker, log).catch((error) => log(`docker: ${error?.message ?? error}`))
+    // The container reads these at start; ensureContainer recreates it when they changed.
+    if (s.autostart) void ensureContainer({ ...s.docker, models: s.models }, log).catch((error) => log(`docker: ${error?.message ?? error}`))
     else log(`autostart is off; container ${s.docker.container} is left as it is`)
     return
   }

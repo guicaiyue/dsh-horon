@@ -31,6 +31,7 @@ window.__ModuleLoader__.load({
     // Sensor / guard hit statistics come from the service (backend/hook_hits.py), not from the
     // Host half: the numbers live in the same database the rules do.
     const HOOKS_URL = `${CONSOLE_URL}api/hooks`
+    const EMBEDDINGS_URL = `${CONSOLE_URL}api/embeddings`
 
     const zh = {
       nav: 'Horon 记忆',
@@ -60,6 +61,37 @@ window.__ModuleLoader__.load({
       paths: '数据与下载',
       pathsHint: '所有数据（数据库、.env、下载的运行时、tag 插件）都在这一个目录下，两种运行方式共用，不会因为换方式丢记忆。留空用默认值，可以写 ~。',
       dataDir: '数据目录',
+      models: '模型',
+      modelsHint: '留空就用 Horon 自带的默认值。填了会以 HORON_* 环境变量传给服务，换模型不用重装镜像。',
+      namerModel: '起名模型（suggest_name / 名字检查）',
+      jevModel: 'Jev 模型（跑题判断 / 传感器复筛）',
+      embeddingModel: '嵌入模型（书腰向量）',
+      modelOverrideHint: '留空 = 用 Horon 默认值',
+      embeddingHint: '换嵌入模型要重建全库向量，否则旧向量与新向量不可比，语义检索会错。',
+      fallbackTitle: '兜底端点',
+      fallbackHint: '主用端点报错时才会走兜底；正常情况不产生额外调用。每条链路各自独立，留空即不启用。嵌入模型没有兜底——不同模型的向量不可比。',
+      namerFallbackBase: '起名链路兜底地址',
+      jevFallbackBase: 'Jev 链路兜底地址',
+      fallbackModel: '兜底模型（起名链路）',
+      jevFallbackModel: '兜底模型（Jev 链路）',
+      fallbackKey: '兜底密钥（起名链路）',
+      jevFallbackKey: '兜底密钥（Jev 链路）',
+      fallbackBaseHint: '形如 http://192.168.1.4:31783 或 https://emrank.tech，不带 /v1',
+      fallbackModelHint: '填对方服务上的模型名',
+      fallbackKeyHint: '留空表示该端点不需要密钥',
+      embeddingsEndpoint: '嵌入端点（可指向本机 / 局域网的 Ollama）',
+      endpointHint: '留空 = OpenRouter 官方端点。Ollama 的 /v1/embeddings 协议相同，填 http://host:11434/v1/embeddings 即可。',
+      localApiKey: '本地端点密钥',
+      optional: '可留空',
+      localApiKeyHint: '指向本地端点时用的密钥；Ollama 默认不需要。',
+      embedLoading: '正在读取向量状态…',
+      embedUnavailable: '向量状态不可用',
+      embedRunning: '正在重建：{done} / {total}',
+      embedMissing: '{n} 个节点还没有当前模型的向量（库里是 {model}），语义检索对这些节点无效',
+      embedReady: '{n} 个节点都有当前模型的向量（{model}）',
+      embedRebuild: '重建全部向量',
+      embedRebuilding: '重建中…',
+      embedRebuildHint: '换了嵌入模型就必须重建：不同模型的向量不可比，混用会让语义检索返回看似正常实则错误的结果。',
       dataDirHint: '默认：{def}',
       proxy: '下载代理',
       proxyHint: '默认 https://gh-proxy.com，用于从 GitHub Release 下载构建物；Docker 模式下拉镜像也会写进 ~/.docker/config.json。留空表示直连。',
@@ -150,6 +182,37 @@ window.__ModuleLoader__.load({
       paths: 'Data and downloads',
       pathsHint: 'Everything lives under this one directory — database, .env, the downloaded runtime, tag plugins — and both runtimes share it, so switching keeps your memory. Empty uses the default; ~ works.',
       dataDir: 'Data directory',
+      models: 'Models',
+      modelsHint: "Empty uses Horon's own defaults. Filled values are passed to the service as HORON_* variables, so changing a model needs no image rebuild.",
+      namerModel: 'Namer model (suggest_name / name check)',
+      jevModel: 'Jev model (off-topic verdicts / sensor re-screening)',
+      embeddingModel: 'Embedding model (blurb vectors)',
+      modelOverrideHint: 'Empty = Horon default',
+      embeddingHint: 'Changing the embedding model means rebuilding every vector: old and new vectors are not comparable, so semantic search would return nonsense.',
+      fallbackTitle: 'Fallback endpoints',
+      fallbackHint: 'Tried only after the primary raises, so a healthy primary costs nothing extra. Each chain is independent; leave it empty to disable. Embeddings have no fallback — vectors from two models are not comparable.',
+      namerFallbackBase: 'Namer fallback base URL',
+      jevFallbackBase: 'Jev fallback base URL',
+      fallbackModel: 'Fallback model (namer)',
+      jevFallbackModel: 'Fallback model (Jev)',
+      fallbackKey: 'Fallback key (namer)',
+      jevFallbackKey: 'Fallback key (Jev)',
+      fallbackBaseHint: 'Like http://192.168.1.4:31783 or https://emrank.tech, without /v1',
+      fallbackModelHint: 'The model name on that service',
+      fallbackKeyHint: 'Empty means the endpoint needs no key',
+      embeddingsEndpoint: 'Embeddings endpoint (can point at a local / LAN Ollama)',
+      endpointHint: "Empty = OpenRouter's endpoint. Ollama's /v1/embeddings speaks the same protocol: use http://host:11434/v1/embeddings.",
+      localApiKey: 'Local endpoint key',
+      optional: 'optional',
+      localApiKeyHint: 'Key for a local endpoint; Ollama needs none by default.',
+      embedLoading: 'Reading vector status…',
+      embedUnavailable: 'Vector status unavailable',
+      embedRunning: 'Rebuilding: {done} / {total}',
+      embedMissing: '{n} nodes have no vector for the current model (stored: {model}); semantic search cannot find them',
+      embedReady: 'All {n} nodes have a vector for the current model ({model})',
+      embedRebuild: 'Rebuild all vectors',
+      embedRebuilding: 'Rebuilding…',
+      embedRebuildHint: 'Changing the embedding model means rebuilding: vectors from two models are not comparable, so mixing them makes semantic search return plausible nonsense.',
       dataDirHint: 'Default: {def}',
       proxy: 'Download proxy',
       proxyHint: 'https://gh-proxy.com by default, used to fetch the artifact from GitHub Releases; in Docker mode it is also written into ~/.docker/config.json for pulls. Empty means a direct connection.',
@@ -443,6 +506,8 @@ window.__ModuleLoader__.load({
 .dshhw-hint{font-size:11px;color:var(--dsw-alias-label-tertiary);line-height:1.45;word-break:break-all;}
 .dshhw-note{font-size:12px;color:var(--dsw-alias-label-secondary);line-height:1.5;}
 .dshhw-error{font-size:12px;color:var(--dsw-alias-state-error-primary);line-height:1.5;white-space:pre-wrap;}
+.dshhw-embed{display:flex;flex-direction:column;gap:6px;align-items:flex-start;margin-top:2px;}
+.dshhw-embed .dshhw-btn{align-self:flex-start;}
 .dshhw-hooks{display:flex;flex-direction:column;gap:6px;}
 .dshhw-hook{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;}
 .dshhw-hook-name{font-size:12px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -525,6 +590,34 @@ window.__ModuleLoader__.load({
       const [copyRequest, setCopyRequest] = React.useState(undefined)
       const [copyNote, setCopyNote] = React.useState(undefined)
       const [hookStats, setHookStats] = React.useState(undefined)
+      const [embedStats, setEmbedStats] = React.useState(undefined)
+      const [rebuilding, setRebuilding] = React.useState(false)
+
+      // Embedding health: how many nodes lack a vector for the current model, and the progress
+      // of a running rebuild. Polls faster while a rebuild is in flight.
+      React.useEffect(() => {
+        let cancelled = false
+        let timer
+        const tick = async () => {
+          try {
+            // The embeddings endpoints live under the console path, not under _dsh, so they do
+            // not go through the config api() helper.
+            const res = await fetch(EMBEDDINGS_URL, { cache: 'no-store' })
+            const payload = await res.json()
+            if (cancelled) return
+            setEmbedStats(payload)
+            setRebuilding(payload?.running === true)
+            timer = setTimeout(tick, payload?.running ? 2000 : 15000)
+          } catch {
+            if (!cancelled) timer = setTimeout(tick, 30000)
+          }
+        }
+        void tick()
+        return () => {
+          cancelled = true
+          clearTimeout(timer)
+        }
+      }, [])
 
       const since = React.useRef(0)
       const clip = React.useRef(null)
@@ -843,6 +936,122 @@ ${t('guardFailedHint')}` : t('guardHint'),
             { className: 'dshhw-hint' },
             `${t('applied')}: ${resolved.dbFile ?? ''} · ${resolved.envFile ?? ''} · ${data?.localDir ?? ''} · ${resolved.base ?? ''}`,
           ),
+          h('h4', { style: { marginTop: '10px' } }, t('models')),
+          h('div', { className: 'dshhw-note' }, t('modelsHint')),
+          h(TextField, {
+            label: t('namerModel'),
+            value: draft.namerModel,
+            placeholder: 'openai/gpt-6-luna',
+            hint: t('modelOverrideHint'),
+            onChange: (value) => update({ namerModel: value }),
+          }),
+          h(TextField, {
+            label: t('jevModel'),
+            value: draft.jevModel,
+            placeholder: 'perplexity/pplx-decider-v1.2',
+            hint: t('modelOverrideHint'),
+            onChange: (value) => update({ jevModel: value }),
+          }),
+          h(TextField, {
+            label: t('embeddingModel'),
+            value: draft.embeddingModel,
+            placeholder: 'qwen/qwen3-embedding-8b',
+            hint: t('embeddingHint'),
+            onChange: (value) => update({ embeddingModel: value }),
+          }),
+          h(TextField, {
+            label: t('embeddingsEndpoint'),
+            value: draft.embeddingsEndpoint,
+            placeholder: 'http://192.168.1.4:11434/v1/embeddings',
+            hint: t('endpointHint'),
+            onChange: (value) => update({ embeddingsEndpoint: value }),
+          }),
+          h(TextField, {
+            label: t('localApiKey'),
+            value: draft.localApiKey,
+            placeholder: t('optional'),
+            hint: t('localApiKeyHint'),
+            onChange: (value) => update({ localApiKey: value }),
+          }),
+          // Replacing the embedding model changes the vector space, so the stored vectors have
+          // to be rebuilt before semantic search means anything again.
+          h(
+            'div',
+            { className: 'dshhw-embed' },
+            h(
+              'div',
+              { className: embedStats?.missing > 0 ? 'dshhw-warn' : 'dshhw-ok' },
+              embedStats === undefined
+                ? t('embedLoading')
+                : embedStats.reason
+                  ? `${t('embedUnavailable')}: ${embedStats.reason}`
+                  : embedStats.running
+                    ? t('embedRunning', { done: embedStats.written, total: embedStats.total })
+                    : embedStats.missing > 0
+                      ? t('embedMissing', { n: embedStats.missing, model: (embedStats.models ?? []).join(', ') || '—' })
+                      : t('embedReady', { n: embedStats.covered, model: (embedStats.models ?? []).join(', ') || '—' }),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshhw-btn',
+                disabled: rebuilding || embedStats === undefined,
+                onClick: async () => {
+                  setRebuilding(true)
+                  try {
+                    await fetch(`${EMBEDDINGS_URL}/rebuild`, { method: 'POST' })
+                  } catch {}
+                },
+              },
+              rebuilding ? t('embedRebuilding') : t('embedRebuild'),
+            ),
+            h('div', { className: 'dshhw-hint' }, t('embedRebuildHint')),
+          ),
+          h('h4', { style: { marginTop: '10px' } }, t('fallbackTitle')),
+          h('div', { className: 'dshhw-note' }, t('fallbackHint')),
+          h(TextField, {
+            label: t('namerFallbackBase'),
+            value: draft.namerFallbackBase,
+            placeholder: 'http://192.168.1.4:31783',
+            hint: t('fallbackBaseHint'),
+            onChange: (value) => update({ namerFallbackBase: value }),
+          }),
+          h(TextField, {
+            label: t('fallbackModel'),
+            value: draft.namerFallbackModel,
+            placeholder: 'gpt-6-luna',
+            hint: t('fallbackModelHint'),
+            onChange: (value) => update({ namerFallbackModel: value }),
+          }),
+          h(TextField, {
+            label: t('fallbackKey'),
+            value: draft.namerFallbackKey,
+            placeholder: 'sk-...',
+            hint: t('fallbackKeyHint'),
+            onChange: (value) => update({ namerFallbackKey: value }),
+          }),
+          h(TextField, {
+            label: t('jevFallbackBase'),
+            value: draft.jevFallbackBase,
+            placeholder: 'https://emrank.tech',
+            hint: t('fallbackBaseHint'),
+            onChange: (value) => update({ jevFallbackBase: value }),
+          }),
+          h(TextField, {
+            label: t('jevFallbackModel'),
+            value: draft.jevFallbackModel,
+            placeholder: 'cloudflare/clef-flash',
+            hint: t('fallbackModelHint'),
+            onChange: (value) => update({ jevFallbackModel: value }),
+          }),
+          h(TextField, {
+            label: t('jevFallbackKey'),
+            value: draft.jevFallbackKey,
+            placeholder: 'sk-...',
+            hint: t('fallbackKeyHint'),
+            onChange: (value) => update({ jevFallbackKey: value }),
+          }),
           h('div', { className: 'dshhw-note' }, t('saveNote')),
           h(
             'div',

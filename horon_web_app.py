@@ -19,10 +19,12 @@ Horon Web 服务：一个进程同时提供控制台 /api 接口、打包好的�
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager, closing
 from pathlib import Path
 
@@ -166,6 +168,80 @@ async def get_hooks() -> dict:
         return await run_in_threadpool(_hook_rules, _db_path)
     except Exception as e:  # 旧版本没有 hook_hits 模块、或表结构不同：面板显示原因，不报 500
         return {'windowDays': 0, 'rules': [], 'quiet': None, 'reason': str(e)}
+
+
+# ---- 重建书腰向量 ---------------------------------------------------------------------------
+# 换嵌入模型之后必须重建：不同模型的向量维度相同但语义空间不同，混在一张表里检索会返回
+# 看似正常实则错误的结果。`integrity.stale_embeddings` 已经把「模型不匹配」算进待重建集合，
+# 所以这里只要把它跑完即可。重建按批进行，节点多时几分钟，因此放到后台线程并用一个状态对象
+# 汇报进度，界面轮询 /api/embeddings/rebuild。
+
+_embed_job: dict = {'running': False, 'total': 0, 'written': 0, 'failed': 0, 'startedAt': None,
+                    'finishedAt': None, 'ok': None, 'error': None, 'model': None}
+
+
+def _embedding_status(db_path: Path) -> dict:
+    """库里的向量现状：用了哪个模型、有多少节点缺向量、重建任务跑到哪了。"""
+    import sqlite3
+
+    with closing(sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True, timeout=5)) as conn:
+        models = [r[0] for r in conn.execute(
+            "SELECT DISTINCT embedding_model FROM concept_embeddings WHERE embedding_model IS NOT NULL")]
+        covered = conn.execute("SELECT COUNT(*) FROM concept_embeddings").fetchone()[0]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM concepts WHERE when_to_read IS NOT NULL AND when_to_read != ''").fetchone()[0]
+    return {**_embed_job, 'models': models, 'covered': covered, 'nodes': total,
+            'missing': max(total - covered, 0)}
+
+
+def _run_rebuild(db_path: Path) -> None:
+    """把 stale_embeddings 跑完，边跑边更新 _embed_job。跑在线程池里。"""
+    from backend.db import HoronDB
+    from backend.integrity import iter_repair_embeddings, stale_embeddings
+    from backend.llm import EMBEDDING_MODEL
+
+    db = None
+    try:
+        db = HoronDB(db_path=db_path, session_id=OFFLINE_DEV_SESSION_ID)
+        _embed_job['total'] = len(stale_embeddings(db))
+        _embed_job['model'] = EMBEDDING_MODEL
+        for batch in iter_repair_embeddings(db):
+            _embed_job['written'] += batch.written
+            _embed_job['failed'] += batch.failed
+        _embed_job['ok'] = _embed_job['failed'] == 0
+    except Exception as e:  # 缺密钥、网络、模型不存在：都记在状态里给界面看
+        _embed_job['ok'] = False
+        _embed_job['error'] = str(e)
+    finally:
+        _embed_job['running'] = False
+        _embed_job['finishedAt'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        if db is not None:
+            db.close()
+
+
+@app.get("/api/embeddings")
+async def get_embeddings() -> dict:
+    """向量现状与重建进度。没有库时给空状态而不是 500。"""
+    if _db_path is None or not _db_path.exists():
+        return {**_embed_job, 'models': [], 'covered': 0, 'nodes': 0, 'missing': 0, 'reason': 'no database yet'}
+    try:
+        return await run_in_threadpool(_embedding_status, _db_path)
+    except Exception as e:
+        return {**_embed_job, 'models': [], 'covered': 0, 'nodes': 0, 'missing': 0, 'reason': str(e)}
+
+
+@app.post("/api/embeddings/rebuild")
+async def rebuild_embeddings() -> dict:
+    """按当前嵌入模型重建全部书腰向量。已经在跑就返回现有进度，不排队第二次。"""
+    if _db_path is None or not _db_path.exists():
+        raise HTTPException(status_code=409, detail="no database yet")
+    if _embed_job['running']:
+        return {'started': False, **_embed_job}
+    _embed_job.update(running=True, total=0, written=0, failed=0, ok=None, error=None,
+                      startedAt=datetime.now(timezone.utc).isoformat(timespec='seconds'),
+                      finishedAt=None)
+    asyncio.create_task(run_in_threadpool(_run_rebuild, _db_path))
+    return {'started': True, **_embed_job}
 
 
 if DIST.is_dir():

@@ -79,11 +79,12 @@ RUN set -eu; \
 WORKDIR /app
 COPY --from=assemble /out/app/ /app/
 COPY docker/entrypoint.sh /usr/local/bin/horon-entrypoint
+COPY docker/patch-llm.py /usr/local/bin/horon-patch-llm
 # tag_plugins is covered by a volume, so the system plugins are also stashed for the entrypoint to
 # seed into it. The entrypoint may arrive with CRLF from a Windows checkout; normalise it.
 RUN set -eu; \
     sed -i 's/\r$//' /usr/local/bin/horon-entrypoint; \
-    chmod 755 /usr/local/bin/horon-entrypoint; \
+    chmod 755 /usr/local/bin/horon-entrypoint /usr/local/bin/horon-patch-llm; \
     mkdir -p /opt/horon-seed/tag_plugins /data /app/.horon-local; \
     cp /app/backend/tag_plugins/*.py /opt/horon-seed/tag_plugins/ 2>/dev/null || true
 

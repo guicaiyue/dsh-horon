@@ -88,9 +88,34 @@ export function dockerSettings(config) {
     image: defaultImage(),
     container: 'horon',
     proxy: proxyOf(c),
+    // Model routing, so a deploy writes the same HORON_* variables the plugin passes in spawn mode.
+    models: c.models ?? {},
     timeZone: hostTimeZone(),
     base: `http://${urlHost(dockerBind)}:${dockerPort}`,
   }
+}
+
+// `-e KEY=VALUE` pairs for the model routing, skipping anything unset. An empty or partial
+// fallback is simply not passed: the service treats a missing base or model as "no fallback".
+export function modelEnvArgs(models) {
+  const m = models ?? {}
+  const out = []
+  const text = (value) => (typeof value === 'string' ? value.trim() : '')
+  if (text(m.namerModel)) out.push(['-e', `HORON_NAMER_MODEL=${text(m.namerModel)}`])
+  if (text(m.jevModel)) out.push(['-e', `HORON_JEV_MODEL=${text(m.jevModel)}`])
+  if (text(m.embeddingModel)) out.push(['-e', `HORON_EMBEDDING_MODEL=${text(m.embeddingModel)}`])
+  if (text(m.embeddingsEndpoint)) out.push(['-e', `HORON_EMBEDDINGS_ENDPOINT=${text(m.embeddingsEndpoint)}`])
+  if (text(m.decisionsEndpoint)) out.push(['-e', `HORON_DECISIONS_ENDPOINT=${text(m.decisionsEndpoint)}`])
+  if (text(m.chatEndpoint)) out.push(['-e', `HORON_CHAT_ENDPOINT=${text(m.chatEndpoint)}`])
+  if (text(m.localApiKey)) out.push(['-e', `HORON_LOCAL_API_KEY=${text(m.localApiKey)}`])
+  for (const [slot, prefix] of [['namerFallback', 'NAMER'], ['jevFallback', 'JEV']]) {
+    const f = m[slot] ?? {}
+    if (!text(f.base) || !text(f.model)) continue
+    out.push(['-e', `HORON_${prefix}_FALLBACK_BASE=${text(f.base)}`])
+    out.push(['-e', `HORON_${prefix}_FALLBACK_MODEL=${text(f.model)}`])
+    if (text(f.key)) out.push(['-e', `HORON_${prefix}_FALLBACK_KEY=${text(f.key)}`])
+  }
+  return out
 }
 
 // The docker invocations of a deploy, as groups of arguments (one group per displayed line).
@@ -114,6 +139,9 @@ export function dockerPlan(d) {
       ['-e', `HORON_DB=/data/${path.basename(d.dbFile)}`],
       ['-e', 'HORON_ROOT=/app'],
       ['-e', `TZ=${d.timeZone}`],
+      // Model routing from the settings page. Only the ones actually configured are passed, so
+      // an unconfigured deploy keeps upstream's constants.
+      ...modelEnvArgs(d.models),
       ['-v', `${d.dbDir}:/data`],
       ['-v', `${d.localDir}:/app/.horon-local`],
       ['-v', `${d.tagPluginsDir}:/app/backend/tag_plugins`],
