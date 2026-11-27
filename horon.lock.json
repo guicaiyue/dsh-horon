@@ -23,11 +23,11 @@
     "baseUrl": "https://github.com/guicaiyue/dsh-horon/releases/download/horon-{commit8}",
     "asset": "horon-app-{platform}-{commit8}.tar.gz",
     "sha256": {
-      "linux-arm64": "b413eda8929bb70613d0220a09367e5e8fe5daa2127dd4e5f81f621ea2e90217",
-      "linux-x64": "cd203aecd111b78a9021cc664db2e715768c87983ec4db1852087058175ba445",
-      "macos-arm64": "192e8f9b45982b0b46ef687dee8b7f89bddec9d24af30ec9c1929c04d034a360",
-      "macos-x64": "36c771ce36c7d25a60b37e7e341c2869dc6d23c4c902da91dbd8a466559f0eee",
-      "win-x64": "b7f55614cce684e905f2812eaeab96fde0cc0cec03bd48588c924b4b2263a04d"
+      "linux-arm64": "6d1c8f4dfd39bb03f71be52666af444593152c84ed3f94d119b572d780082b5a",
+      "linux-x64": "309406dad9014e3289f0e00b84e876c3cb2fba7622d0dc68c7d8645dafd994bf",
+      "macos-arm64": "97164daafca244b807b5bf76a2a401e0de027e2b88fb0ec5d40136927527f4ff",
+      "macos-x64": "08fdd96c89293f190a69195f6e36bc7cb0e4e6acfde3f5778b968fa4fddbb91e",
+      "win-x64": "e5e7c7a1c5f7ed23974d4923d03446061f3530dbb25553e30ece0416e57c8c65"
     }
   },
   "platforms": [
