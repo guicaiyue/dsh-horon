@@ -591,7 +591,7 @@ async function describeConfig(ctx, config) {
 // The draft the page is editing, without saving it: the commands, compose file and paths for it.
 async function previewConfig(config, input) {
   const merged = { ...(config ?? {}), ...cleanInput(input) }
-  const d = dockerSettings(merged)
+  const d = dockerSettings({ ...merged, models: modelSettings(merged) })
   const [texts, serving] = await Promise.all([renderTexts(d), isServing(d.base, 1200)])
   return { resolved: describeResolved(d), base: d.base, serving, texts }
 }
@@ -701,7 +701,8 @@ async function handleApi(ctx, config, s, req, res, incoming) {
       const body = (await readJson(req)) ?? {}
       // Deploying from an unsaved draft is deliberate: it is how the paths are checked before
       // they are written into the profile.
-      const d = dockerSettings({ ...(config ?? {}), ...cleanInput(body.config) })
+      const deployed = { ...(config ?? {}), ...cleanInput(body.config) }
+      const d = dockerSettings({ ...deployed, models: modelSettings(deployed) })
       sendJson(res, 200, startDeploy(d))
       return
     }
