@@ -144,7 +144,10 @@ function settings(config) {
       : url !== undefined
         ? 'url'
         : 'spawn'
-  const docker = dockerSettings(c)
+  // Model routing is computed once and handed to dockerSettings, so the deploy plan and the
+  // spawn env read the same object instead of docker.js re-deriving it from the raw config.
+  const models = modelSettings(c)
+  const docker = dockerSettings({ ...c, models })
   const artifact = artifactSettings(c)
   // One path decides the database, the key file and the tag plugins; seeding needs the last one.
   const dataDir = resolveDataDir(c)
@@ -185,7 +188,7 @@ function settings(config) {
     base: mode === 'url' ? url : mode === 'docker' ? docker.base : `http://${urlHost(host)}:${port}`,
     // Model routing, passed to the service as HORON_* variables. Empty means "leave upstream's
     // constant alone", so an unconfigured install behaves exactly as before.
-    models: modelSettings(c),
+    models,
   }
 }
 
