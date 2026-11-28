@@ -306,16 +306,20 @@ function runDocker(args, { onData, timeoutMs, env } = {}) {
 const firstLine = (text) => String(text ?? '').trim().split(/\r?\n/).pop() ?? ''
 
 /**
- * `docker pull` runs in the engine, not in this process, so an environment variable here cannot
- * reach it. Docker Desktop reads `proxies` from ~/.docker/config.json — the same file its own
- * Settings page writes — so the proxy is recorded there before a pull. A Linux engine keeps that
- * value in its service unit instead, and the log says so rather than pretending it took effect.
+ * The download proxy is for the host's GitHub fetches, and it is deliberately NOT written into
+ * `~/.docker/config.json`.
+ *
+ * That was tried and reverted: `proxies.default` there is not a pull-only setting. The Docker CLI
+ * copies it into every container it creates as HTTP(S)_PROXY, so recording a GitHub mirror like
+ * gh-proxy.com there sends the container's own API traffic — OpenRouter, a LAN gateway, a local
+ * Ollama — through a host that only speaks for github.com. Every one of those calls fails with
+ * "Tunnel connection failed: 400", and the container looks broken for reasons unrelated to docker.
+ *
+ * Pulls that need a proxy belong to the engine: put it in the docker service unit (Linux) or in
+ * Docker Desktop's own settings (macOS/Windows). This function therefore only reports the state,
+ * and removes a `proxies.default` an earlier version of this plugin may have left behind.
  */
 async function applyDockerProxy(proxy, say) {
-  if (proxy === '') {
-    say('\n# no download proxy configured; pulling directly\n')
-    return
-  }
   let raw
   let config = {}
   try {
@@ -324,28 +328,25 @@ async function applyDockerProxy(proxy, say) {
   } catch {
     config = {}
   }
-  const current = config.proxies?.default ?? {}
-  if (current.httpProxy === proxy && current.httpsProxy === proxy) {
-    say(`\n# docker already uses ${proxy}\n`)
-    return
-  }
-  if (raw !== undefined) {
+  const stale = config.proxies?.default
+  if (stale) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-')
     await fs.writeFile(`${DOCKER_CONFIG}.horon-backup-${stamp}`, raw, 'utf8')
-    say(`\n# backed up config.json -> ${path.basename(DOCKER_CONFIG)}.horon-backup-${stamp}\n`)
+    const rest = { ...config.proxies }
+    delete rest.default
+    if (Object.keys(rest).length === 0) delete config.proxies
+    else config.proxies = rest
+    await fs.mkdir(path.dirname(DOCKER_CONFIG), { recursive: true })
+    await fs.writeFile(DOCKER_CONFIG, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
+    say(`\n# removed proxies.default from ${DOCKER_CONFIG} (it reached into every container)\n`)
+    say(`# previous file kept at ${path.basename(DOCKER_CONFIG)}.horon-backup-${stamp}\n`)
   }
-  config.proxies = {
-    ...(config.proxies ?? {}),
-    default: {
-      httpProxy: proxy,
-      httpsProxy: proxy,
-      noProxy: current.noProxy ?? 'localhost,127.0.0.1,::1',
-    },
+  if (proxy === '') {
+    say('# no download proxy configured; pulling directly\n')
+    return
   }
-  await fs.mkdir(path.dirname(DOCKER_CONFIG), { recursive: true })
-  await fs.writeFile(DOCKER_CONFIG, `${JSON.stringify(config, null, 2)}\n`, 'utf8')
-  say(`# recorded the proxy in ${DOCKER_CONFIG}\n`)
-  say('# Docker Desktop applies it; a Linux engine needs the same value in its service config\n')
+  say(`# download proxy ${proxy} is used for artifact downloads only\n`)
+  say('# a pull that needs one belongs in the docker service unit or Docker Desktop settings\n')
 }
 
 // Some pulls (and `docker login`) do honour the client environment, so pass it along as well.
