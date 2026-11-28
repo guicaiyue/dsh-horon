@@ -106,7 +106,9 @@ node test/host-smoke.mjs
 #   只想验证前端复制/目录布局时可以跳过 npm：--web-dist <已构建的 dist 目录>
 # 4. 改版本号（有新功能走 minor），再 node scripts/market-entry.mjs 重生成市场条目
 # 5. 推 main：image 与 release 两个工作流分别出镜像与构建物
-# 6. 打标签发 npm：git tag v1.5.0 && git push origin v1.5.0
+# 6. 打标签发 npm：git tag -a vX.Y.Z && git push origin vX.Y.Z
+#    打之前先 git log -1 --format=%s 确认 HEAD 不是 chore(lock) 那类 [skip ci] 提交，
+#    否则 tag push 会被整份跳过、publish 不触发（救法：gh workflow run publish.yml --ref vX.Y.Z）
 ```
 
 **sha256 不用手填**：`release.yml` 的 `record digests in the lock file` 跑 `lock-sync.mjs digests`，
