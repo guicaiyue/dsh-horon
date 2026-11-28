@@ -169,7 +169,7 @@ client.js         客户端 bundle：侧栏面板（含首次选择运行方式�
 cordis.patch.yml  本包自带的 loader 行（id/name/config 默认值，不带 mode）
 horon_web_app.py  容器/本机进程里的 FastAPI 入口：/api 路由 + 打包好的前端
 locale/           zh/en 文案
-skills/           三份说明书；生成物，发布前由组装器从锁定 commit 同步（`.gitignore` 已列，索引里仍有旧副本）
+skills/           三份说明书；生成物，不进 git，发布前由组装器从锁定 commit 同步到 tarball
 docker/           Dockerfile（按 SHA 自取源库）、入口脚本、锁定依赖、compose、patch-llm.py（模型路由补丁）
 market/dsh-horon.json  插件市场条目，由 `node scripts/market-entry.mjs` 生成，版本须与 package.json 一致
 docs/deployment.md  发布链路、构建物内容与升级流程
