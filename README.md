@@ -169,9 +169,12 @@ client.js         客户端 bundle：侧栏面板（含首次选择运行方式�
 cordis.patch.yml  本包自带的 loader 行（id/name/config 默认值，不带 mode）
 horon_web_app.py  容器/本机进程里的 FastAPI 入口：/api 路由 + 打包好的前端
 locale/           zh/en 文案
-skills/           三份说明书；git 忽略，发布前由组装器从锁定 commit 同步
-docker/           Dockerfile（按 SHA 自取源库）、入口脚本、锁定依赖、compose
+skills/           三份说明书；生成物，发布前由组装器从锁定 commit 同步（`.gitignore` 已列，索引里仍有旧副本）
+docker/           Dockerfile（按 SHA 自取源库）、入口脚本、锁定依赖、compose、patch-llm.py（模型路由补丁）
+market/dsh-horon.json  插件市场条目，由 `node scripts/market-entry.mjs` 生成，版本须与 package.json 一致
 docs/deployment.md  发布链路、构建物内容与升级流程
+docs/vs-horon-harness.md  与上游 horon-harness 的逐项对比与选型判据
+docs/dev-profile.md  宿主侧 `horon-dev` profile（历史路线，现用 dsh-dev 容器）
 ```
 
 ## 发布与部署（维护者）
@@ -193,7 +196,7 @@ node test/host-smoke.mjs && node test/artifact-smoke.mjs      # 只跑纯函数�
 | --- | --- | --- |
 | `mode` | 首次安装面板会问 | **面板只给两种**：`artifact` 显示为「正常启动（不用 Docker）」，`docker` 显示为「Docker 启动」。`spawn` / `url` 仍在代码里，供开发和接已有远端服务，不在面板上 |
 | `dataDir` | `~/.horon` | **唯一的路径设置**。数据库、`.env`、构建物、tag 插件全部由它派生；两种运行方式共用 |
-| `proxy` | `https://gh-proxy.com` | 下载代理：构建物从 GitHub Release 取；docker 模式下同时写进 `~/.docker/config.json` 的 `proxies`。留空表示直连 |
+| `proxy` | `https://gh-proxy.com` | 下载代理，只作用于**构建物下载**（GitHub Release 取包）与 `docker pull` 命令本身。留空表示直连。**不会写进 `~/.docker/config.json`**：那份配置会被 Docker CLI 复制成每个容器的 `HTTP(S)_PROXY`，把容器自己的 API 流量也送去镜像站 |
 | `autostart` | `true` | `false` 只挂插件，不拉起服务/容器 |
 | `hooks` | `true` | `false` 只留 `horon` 工具，不挂钩子（也可用环境变量 `HORON_HOOKS=off`） |
 | `skills` | `spawn` 模式外默认开 | 是否注册三个 horon skill |
@@ -208,6 +211,20 @@ node test/host-smoke.mjs && node test/artifact-smoke.mjs      # 只跑纯函数�
 | `<dataDir>/tag_plugins/` | tag 插件；artifact 模式每次启动镜像进构建物的 `app/backend/tag_plugins`，docker 模式直接挂载。包自带的 `记忆入库` 由 `seed.js` 首启复制进来，用户自己的插件也放这里 |
 
 开发/接入已有服务时才用：`root`（`~/horon`）、`python`、`url`、`host` / `port`（`127.0.0.1:8710`）。
+
+## 模型路由与兜底
+
+Horon 服务只调三个模型。默认值写死在上游 `backend/llm.py`，本插件通过 `docker/patch-llm.py` 把它们改成读环境变量（docker 模式的 `entrypoint` 与 spawn/artifact 模式的 `apply()` 都会打这个补丁，幂等）。设置页「设置 → Horon 服务」的「模型」与「兜底端点」两段写的就是这些值，**留空即用上游默认**，所以不配置时行为与上游完全一致。
+
+| 用途 | 主用变量 | 端点变量 | 兜底变量 | 兜底默认 |
+| --- | --- | --- | --- | --- |
+| 起名 / 名字检查 | `HORON_NAMER_MODEL` | `HORON_CHAT_ENDPOINT` | `HORON_NAMER_FALLBACK_{BASE,MODEL,KEY}` | 无 |
+| Jev 复筛（返回概率） | `HORON_JEV_MODEL` | `HORON_DECISIONS_ENDPOINT` | `HORON_JEV_FALLBACK_{BASE,MODEL,KEY}` | 无 |
+| 书腰 / 节点名向量 | `HORON_EMBEDDING_MODEL` | `HORON_EMBEDDINGS_ENDPOINT` | **无** | — |
+
+**兜底只在主用抛错时走**，主用正常时不产生额外调用。三条链路里只有嵌入刻意没有兜底：不同模型的向量维度可以相同而语义空间不同，静默切换会让 `search_semantic` 返回看似正常实则错误的结果。
+
+**换嵌入模型必须重建全库向量。** 设置页「模型」段那个按钮调的是 `POST /api/embeddings/rebuild`，`GET /api/embeddings` 给出覆盖率、当前模型与进度。指向非 `openrouter.ai` 的端点（例如局域网 Ollama）时代码会去掉 OpenRouter 的零留存 `provider` 块、不强制要密钥（`HORON_LOCAL_API_KEY` 可选）；Ollama 的 `/v1/embeddings` 与 OpenRouter 同协议，换 URL 即可，不用适配器。
 
 ## License
 

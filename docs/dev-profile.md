@@ -1,5 +1,10 @@
 # 二开环境：`horon-dev` profile
 
+> **历史路线（2026-11-28 标注）**：现在开发在 **`dsh-dev` 容器**里做——仓库 bind mount 到 `/workspace/dsh-horon`，
+> profile 用 `link:` 依赖，容器里自带 Python 3.12 venv 与 dsh，不碰宿主 profile。挂载与验证方式见记忆节点
+> 「把 DSH 插件绑进 dsh-dev 容器开发时」。本文描述的 `horon-dev` profile 仍存在（`~/.dsh/profiles/horon-dev`，
+> 自 2026-11-13 起未再使用），保留作为宿主侧直跑的备选，新开发不要从这里起步。
+
 本机把 dsh-horon 挂成 `link:` 依赖的开发 profile，改完源码重启这个 profile 即生效，不污染日常用的 `web` profile。
 
 ## 位置

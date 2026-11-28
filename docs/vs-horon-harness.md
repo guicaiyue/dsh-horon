@@ -13,7 +13,7 @@
 
 ## 事实对比
 
-| 维度 | `dsh-horon` 1.4.0（本仓库） | `horon-harness` 0.1.0（上游） |
+| 维度 | `dsh-horon` 1.6.3（本仓库） | `horon-harness` 0.1.0（上游） |
 | --- | --- | --- |
 | 行 id / 工具名 | `dsh-horon` / `horon` | `horon` / `horon` |
 | 配置 schema | 裸对象 + `settings()` 手写解析 | schemastery `Config`（`.volatile()`、`role('credential-ref')`） |
@@ -21,7 +21,8 @@
 | 依赖前提 | artifact 只需 Python 3.12；docker 只需 Docker | 只需联网；无 git / npm / Docker / 现成 Python |
 | 运行形态 | 常驻服务（`horon_web_app.py` 提供 `/api/cli`、`/api/hook/{event}`、控制台前端），dsh 反代 `/dsh-horon/` | 无常驻服务：每次调用直接 spawn `frontend/cli.py` / `run_gateway.py`，不占端口 |
 | 面板 | 侧栏面板 + 主区 iframe 控制台 + 设置页 | 只有设置页 |
-| 设置页能力 | 运行时选择（构建物 / Docker）、数据目录、代理、部署进度与日志、重置 | 数据目录、开场提醒、子代理开关、两个 key |
+| 设置页能力 | 运行时选择（构建物 / Docker）、数据目录、代理、部署进度与日志、重置、**模型与端点覆盖 + 两条兜底链 + 向量重建** | 数据目录、开场提醒、子代理开关、两个 key |
+| 换模型 | 不用改代码也不用量身定制镜像：`docker/patch-llm.py` 把三个模型与三个端点改成读 `HORON_*`，设置页填了即生效，留空同上游 | 改 `backend/llm.py` 常量，随上游代码走 |
 | 密钥存放 | `<dataDir>/.env` 明文（容器与构建物共用） | dsh 凭据库（`credentials.set/unset`，可单独「移除 key」） |
 | 云端记忆 | 不支持 | 支持 AISoulKeeper（`HORON_REMOTE_KEY`）+ 规则库本地缓存（`HORON_LOCAL_DIR`）+ 审计行上送 |
 | 开场行为 | 自动跑 `login`，把 boot 节点注入上下文 | 发一条开场提醒，让模型自己跑 `login` 并整篇读手册 |

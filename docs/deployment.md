@@ -6,7 +6,12 @@ dsh-horon 把 Horon 服务当成**已发布的产物**来取用，而不是让�
 | 方式 | 用户侧前置 | 取什么 | 数据目录 |
 | --- | --- | --- | --- |
 | `artifact` | Python 3.12 | GitHub Release 里的 `horon-app-<platform>-<commit8>.tar.gz`，走 `proxy`（默认 `https://gh-proxy.com`） | `<dataDir>`，默认 `~/.horon` |
-| `docker` | Docker | Docker Hub 上 `<image.name>:<tag>`；`proxy` 写进 `~/.docker/config.json` 供拉取 | `<dataDir>`，挂到容器 `/data` |
+| `docker` | Docker | Docker Hub 上 `<image.name>:<tag>` | `<dataDir>`，挂到容器 `/data` |
+
+`proxy` 只用于构建物下载与 `docker pull` 命令本身，**不写 `~/.docker/config.json`**。那份文件里的
+`proxies.default` 会被 Docker CLI 复制成每个容器的 `HTTP(S)_PROXY`，把容器里的模型请求也送去镜像站，
+表现为所有出网调用报 `Tunnel connection failed: 400`。需要代理的 pull 属于引擎：Linux 写 docker 服务
+单元，Docker Desktop 用它自己的设置页。1.6.3 起插件发现残留的 `proxies.default` 会备份后删掉。
 | `spawn`（开发用，不在面板上） | 本机 Horon 克隆 | 直接跑 `root/frontend/cli.py` | 克隆目录 |
 | `url`（不在面板上） | 一个跑着的服务 | 只记地址 | — |
 
@@ -40,15 +45,19 @@ dsh-horon 把 Horon 服务当成**已发布的产物**来取用，而不是让�
 插件在运行时读它：默认镜像名、构建物 URL、期望的 sha256 都来自这里。**运行时不联网查版本**，
 也不会自动升级——升级是一次锁文件改动 + 一次发布。
 
-## CI 三段
+## CI 四段
 
-| 工作流 | 触发 | 产物 |
+| 工作流 | 触发（`paths` 过滤） | 产物 |
 | --- | --- | --- |
-| `.github/workflows/image.yml` | `horon.lock.json` / `docker/**` 变更 | 多架构镜像推 Docker Hub，然后拉下来跑 `/api/cli` 与 `/api/hook/Stop` 的契约冒烟 |
-| `.github/workflows/release.yml` | `horon.lock.json` / `scripts/**` 变更 | 五个平台的 `horon-app-*.tar.gz` + `.sha256`，发 GitHub Release，并把 sha256 汇总到 job summary |
-| `.github/workflows/publish.yml` | 推 `v*` 标签 | 从锁定 commit 同步 `skills/` 后 `npm publish`（带 provenance） |
+| `.github/workflows/ci.yml` | push main / PR | 语法、`horon.lock.json` 断言、市场条目版本一致、`test/host-smoke.mjs`、包内容 |
+| `.github/workflows/image.yml` | `horon.lock.json` / `docker/**` / `scripts/**` / `horon_web_app.py` / `artifact.js` | 多架构镜像推 Docker Hub，然后拉下来跑 `/api/cli` 与 `/api/hook/Stop` 的契约冒烟 |
+| `.github/workflows/release.yml` | `horon.lock.json` / `scripts/**` / `horon_web_app.py` / `docker/requirements.lock.txt` | 五个平台的 `horon-app-*.tar.gz` + `.sha256`，发 GitHub Release，并把 sha256 汇总到 job summary |
+| `.github/workflows/publish.yml` | 推 `v*` 标签（或手动派发到 tag ref） | 从锁定 commit 同步 `skills/` 后 `npm publish`（带 provenance） |
 
-三段都不在插件仓库里存源库代码：`release` 与 `image` 都用 `actions/checkout` 或
+**只改插件 js 时 image 与 release 不该触发**，那是正确的路径过滤；改了 `horon_web_app.py` 或 `docker/**`
+则必须同时 bump `horon.lock.json` 的 `image.tag`，否则镜像不重建、docker 模式仍跑旧代码。
+
+四段都不在插件仓库里存源库代码：`release` 与 `image` 都用 `actions/checkout` 或
 `git fetch --depth 1 origin <SHA>` 把锁定 commit 取进构建环境。`scripts/assemble.mjs` 是唯一的
 组装器，镜像和构建物因此看到同一棵树。
 
@@ -117,7 +126,9 @@ node test/host-smoke.mjs
 npm 已发布是前提——市场里点「安装」最终就是 `pnpm add <name>@<version>`。
 
 `package.json` 这边要成立的条件：`private` 已去掉、`files` 只列运行时必需文件、
-`engines.dsh` 覆盖目标版本。`npm pack --dry-run` 现在是 22 个文件 / 83 kB，构建上下文与上游源码都不在里面。
+`engines.dsh` 覆盖目标版本。`npm pack --dry-run` 现在是 26 个文件 / 107 kB，构建上下文与上游源码都不在里面。
+**新增运行时文件必须同时加进 `files`**：`docker/patch-llm.py` 就漏过一次——代码写了、测试过了，但没进包，
+`npm pack --dry-run` 的文件数才露出来。
 
 ## 许可
 

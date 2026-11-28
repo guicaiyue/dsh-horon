@@ -25,9 +25,11 @@ Node 22+ ESM（无打包器、无运行时依赖）；`client.js` 是 dsh 客户
 - 发布链路：`ci.yml`（语法 + lock + 市场条目 + 冒烟）、`release.yml`（五平台构建物）、`image.yml`（镜像 + 契约冒烟）、`publish.yml`（打 tag 时刷 skills 后 `npm publish`）。
 - 上游 `backend/harness/dsh-plugin/` 被 `assemble.mjs` 排除：本仓库取代它，不要把两份插件混进同一份产物。
 
-## 当前状态（2026-11-27）
+## 当前状态（2026-11-28）
 
-- 锁定在上游 `1c62240`（11-09）；上游 HEAD 是 `b098914`（11-17，15 个 commit，无 DB 迁移）。升级清单见 `docs/deployment.md`。
-- `harness.js` 的 MEMORY_POLICY 与工具描述已改成分词版 `search_keyword`（上游 11-15 改的语义），**尚未发版**。
+- 锁在上游 `b098914`（11-17，无 DB 迁移），镜像 `1.1.1`，npm 发布版 `1.6.3`。上游 HEAD 若有更新，升级清单见 `docs/deployment.md`。
+- **两条独立的更新线，别混**：改 `index.js` / `client.js` / `harness.js` / `docker.js` 只需 bump `package.json` 走 npm；改 `docker/**` 或 `horon_web_app.py` 必须同时 bump `horon.lock.json` 的 `image.tag` 并重建镜像，宿主机还要在设置页点一次**部署**才会换容器。
+- 模型路由（三个模型 + 三个端点 + 两条兜底链）由 `docker/patch-llm.py` 在运行时改成读 `HORON_*` 环境变量，设置页可配，留空即上游默认。见 README「模型路由与兜底」。
 - 与上游 npm 包 `horon-harness@0.1.0` 的关系、共存冲突与选型判据：`docs/vs-horon-harness.md`。
-- 待办：`git rm -r --cached skills` 让生成物真的不被跟踪；`HORON_LOCAL_DIR` 在 artifact/spawn 模式下显式指向 `<dataDir>/local`；面板展示 `read_hook`/`audit` 的钩子命中统计（需先升到含 `hook_hits.py` 的 commit）。
+- 待办：`git rm -r --cached skills` 让生成物真的不被跟踪（`.gitignore` 已列，索引里仍有 3 份旧副本）。
+- 开发在 `dsh-dev` 容器里做（仓库 bind mount + `link:` 依赖）；宿主 `~/.dsh/profiles/web` **只装 npm 发布版**，不要手改它的 `node_modules`——那样验的是自己改的代码，会掩盖发布包的 bug。
